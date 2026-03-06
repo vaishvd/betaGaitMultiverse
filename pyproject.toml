@@ -1,0 +1,23 @@
+[project]
+name = "betagaitmultiverse"
+version = "0.1.0"
+description = "Multiverseanalysis of gait related EEG beta band activity"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "autoreject>=0.4.3",
+    "ipykernel>=7.2.0",
+    "ipython>=9.11.0",
+    "mne>=1.11.0",
+    "mne-bids>=0.18.0",
+    "mne-icalabel>=0.8.1",
+    "openneuro-py>=2026.3.0",
+    "pip>=26.0.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

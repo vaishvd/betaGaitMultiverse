@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 def define_dir(root, *names):
@@ -9,8 +8,9 @@ def define_dir(root, *names):
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-# Get the root directory of the repository (parent of 'utils')
+# Get the root directory of the repository (parent of 'src')
 dir_proj = Path(__file__).resolve().parents[1]
 
 # Define paths for data directories and work notebooks
-dir_data = define_dir(dir_proj, "data")
+DIR_DATA = define_dir(dir_proj, "data")
+DIR_RAWDATA = define_dir(DIR_DATA, "raw")
