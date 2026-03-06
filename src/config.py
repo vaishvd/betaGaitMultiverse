@@ -14,3 +14,6 @@ dir_proj = Path(__file__).resolve().parents[1]
 # Define paths for data directories and work notebooks
 DIR_DATA = define_dir(dir_proj, "data")
 DIR_RAWDATA = define_dir(DIR_DATA, "raw")
+DIR_ICA = define_dir(DIR_DATA, "ica")
+DIR_CLEAN = define_dir(DIR_DATA, "clean")
+
