@@ -17,21 +17,24 @@ import mne
 import mne_bids
 import numpy as np
 
-from src.config import DIR_RAWDATA, DIR_ICA, SUBJECTS
+from src.config import DIR_RAWDATA, DIR_ICA
 
 # Parameters
 L_FREQ = 1.0
 BAD_CHAN_THRESHOLD = 3.0  # standard deviations
 ICA_METHOD = "infomax"
 
-for subject in SUBJECTS[0:3]:
+# find sub- folders in raw data directory and extract subject IDs
+sub_dirs = [d for d in (DIR_RAWDATA).iterdir() if d.is_dir() and d.name.startswith("sub-")]
+
+for sub in sub_dirs[0:3]:
 
     # --- Step 1: Load raw data from BIDS ---
     bids_path = mne_bids.BIDSPath(
-        subject=subject,
+        subject=sub.name.split("-")[1],
         task="task",
         datatype="eeg",
-        root=DIR_DATA,
+        root=DIR_RAWDATA,
     )
     raw = mne_bids.read_raw_bids(bids_path, verbose="WARNING")
 
@@ -69,7 +72,7 @@ for subject in SUBJECTS[0:3]:
     # --- Step 6: Re-reference to common average ---
     raw.set_eeg_reference("average")
 
-    raw.plot_sen
+    # raw.plot_sen
 
     # --- Step 7: Fit ICA ---
     ica = mne.preprocessing.ICA(
