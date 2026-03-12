@@ -1,3 +1,7 @@
+"""
+This file contains the functions required to run each preprocessing step on segmented data before ICA
+"""
+
 import numpy as np
 import mne
 from autoreject import AutoReject
@@ -63,22 +67,30 @@ def load_clean_raw(subject: str, input_dir: Path):
     raw = mne.io.read_raw_fif(raw_file, preload=True)
     return raw
 
-def interpolate_bad_channels(raw: mne.io.BaseRaw):
+def interpolate_bad_channels(raw: mne.io.BaseRaw, plot=True):
     """
-    Interpolate bad channels in the raw data
+    Interpolate bad channels in the raw data and optionally plot them.
     """
 
     if raw.info["bads"]:
         print("Interpolating bad channels:", raw.info["bads"])
+        if plot:
+            raw.plot(scalings=dict(eeg=100e-6), title="Before Interpolation")
         raw.interpolate_bads(reset_bads=True)
+        if plot:
+            raw.plot(scalings=dict(eeg=100e-6), title="After Interpolation")
+    else:
+        print("No bad channels detected.")
     return raw
 
-def rereference_raw(raw: mne.io.BaseRaw, ref_type="average"):
+def rereference_raw(raw: mne.io.BaseRaw, ref_type="average", plot=True):
     """
-    Set EEG reference 
+    Set EEG reference and plot.
     """
-
     raw.set_eeg_reference(ref_type)
+    print(f"Applied {ref_type} reference.")
+    if plot:
+        raw.plot(scalings=dict(eeg=100e-6), title=f"EEG after {ref_type} reference")
     return raw
 
 def create_fixed_length_epochs(raw: mne.io.BaseRaw, duration: float):
@@ -88,9 +100,10 @@ def create_fixed_length_epochs(raw: mne.io.BaseRaw, duration: float):
 
     events = mne.make_fixed_length_events(raw, id=1, duration=duration)
     epochs = mne.Epochs(raw, events, tmin=0, tmax=duration, baseline=None, preload=True)
+    print(f"Created {len(epochs)} epochs of {duration} s each.")
     return epochs
 
-def run_autoreject(epochs: mne.Epochs, n_interpolate=[1, 2, 3, 4], random_state=11):
+def run_autoreject(epochs: mne.Epochs, n_interpolate=[1, 2, 3, 4], random_state=11, plot = True):
     """
     Fit AutoReject and return clean epochs and reject log
     """
@@ -104,13 +117,18 @@ def run_autoreject(epochs: mne.Epochs, n_interpolate=[1, 2, 3, 4], random_state=
     ar.fit(epochs)
     epochs_ar, reject_log = ar.transform(epochs, return_log=True)
     print("Bad epochs detected:", reject_log.bad_epochs.sum())
+    
+    if plot and reject_log.bad_epochs.any():
+        print("Plotting rejected epochs...")
+        epochs[reject_log.bad_epochs].plot(scalings=dict(eeg=100e-6), title="Rejected Epochs")
+
     return epochs_ar, reject_log
 
 def save_epochs(epochs_ar: mne.Epochs, output_dir: Path, subject: str):
     """
     Save pre-ICA epochs
     """
-    
+
     output_dir.mkdir(exist_ok=True)
     output_file = output_dir / f"sub-{subject}_preica-epo.fif"
     epochs_ar.save(output_file, overwrite=True)
