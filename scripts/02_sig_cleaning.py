@@ -19,8 +19,6 @@ from src.preprocessing import (
     notch_filter
 )
 
-
-# PARAMETERS
 L_FREQ = 1.0
 BAD_CHAN_THRESHOLD = 3.0
 
