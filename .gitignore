@@ -3,5 +3,6 @@ data/
 __pycache__/
 *.fdt
 *.set
+initialanalysis.ipynb
 
 uv.lock
