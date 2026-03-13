@@ -19,7 +19,7 @@ BAD_CHAN_THRESHOLD = 3.0
 EPOCH_DURATION = 5.0  # seconds
 SUBJECTS = ["S18"]
 INPUT_DIR = DIR_SIGCLEAN
-OUTPUT_DIR = DIR_DATA / "d03_pre_ica"
+OUTPUT_DIR = DIR_DATA / "d03_preica"
 
 for subject in SUBJECTS:
     print(f"\nProcessing subject {subject}")
