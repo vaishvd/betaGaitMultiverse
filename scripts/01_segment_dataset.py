@@ -25,7 +25,7 @@ END_MARKER = "End B3"
 
 BUFFER = 5
 
-OUTPUT_DIR = DIR_DATA / "segmented"
+OUTPUT_DIR = DIR_DATA / "d01_segmented"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 SUBJECTS = ["S18"]   # run only this subject

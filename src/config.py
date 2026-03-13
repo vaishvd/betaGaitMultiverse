@@ -12,8 +12,9 @@ def define_dir(root, *names):
 dir_proj = Path(__file__).resolve().parents[1]
 
 # Define paths for data directories and work notebooks
-DIR_DATA = define_dir(dir_proj, "data")
-DIR_RAWDATA = define_dir(DIR_DATA, "raw")
-DIR_ICA = define_dir(DIR_DATA, "ica")
-DIR_CLEAN = define_dir(DIR_DATA, "clean")
-
+DIR_DATA = define_dir(dir_proj, "data") # Data folder
+DIR_RAWDATA = define_dir(DIR_DATA, "d00_raw") # Raw datasets
+DIR_SEG = define_dir(DIR_DATA, "d01_segmented") # Datasets segmented with events of interest
+DIR_SIGCLEAN = define_dir(DIR_DATA, "d02_sigclean") # Data after signal cleaning
+DIR_PREICA = define_dir(DIR_DATA, "d03_preica") # Data before ICA
+DIR_ICA = define_dir(DIR_DATA, "d04_ica") # Data after ICA

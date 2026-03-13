@@ -12,7 +12,7 @@ This script executes the following preprocessing steps:
 
 from pathlib import Path
 import mne
-from src.config import DIR_DATA
+from src.config import DIR_DATA, DIR_SEG
 from src.preprocessing import (
     prepare_eeg_channels,
     highpass_filter,
@@ -22,8 +22,8 @@ from src.preprocessing import (
 L_FREQ = 1.0
 BAD_CHAN_THRESHOLD = 3.0
 
-INPUT_DIR = DIR_DATA / "segmented"
-OUTPUT_DIR = DIR_DATA / "clean"
+INPUT_DIR = DIR_SEG
+OUTPUT_DIR = DIR_DATA / "d02_sigclean"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 

@@ -4,7 +4,7 @@ Pre-ICA data preparation: detect and interpolate bad channels, re-reference, cre
 """
 
 from pathlib import Path
-from src.config import DIR_DATA
+from src.config import DIR_DATA, DIR_SIGCLEAN
 from src.preprocessing import (
     load_clean_raw,
     detect_bad_channels,
@@ -18,8 +18,8 @@ from src.preprocessing import (
 BAD_CHAN_THRESHOLD = 3.0
 EPOCH_DURATION = 5.0  # seconds
 SUBJECTS = ["S18"]
-INPUT_DIR = DIR_DATA / "clean"
-OUTPUT_DIR = DIR_DATA / "pre_ica"
+INPUT_DIR = DIR_SIGCLEAN
+OUTPUT_DIR = DIR_DATA / "d03_pre_ica"
 
 for subject in SUBJECTS:
     print(f"\nProcessing subject {subject}")
