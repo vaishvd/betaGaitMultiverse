@@ -84,7 +84,7 @@ for sub in sub_dirs[0:3]:
     print(f"  ICA components: {ica.n_components_}")
 
     # --- Step 8: Save ICA solution ---
-    ica_fname = DIR_ICA / f"sub-{subject}_task-task_ica.fif"
+    ica_fname = DIR_ICA / f"sub-{sub}_task-task_ica.fif"
     ica.save(ica_fname, overwrite=True)
     print(f"  Saved: {ica_fname.name}")
 
