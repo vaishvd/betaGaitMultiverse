@@ -3,6 +3,10 @@ data/
 __pycache__/
 *.fdt
 *.set
+
+#Ignore play notebook
+initialanalysis.ipynb
+./initialanalysis.ipynb
 */initialanalysis.ipynb
 
 uv.lock
