@@ -35,42 +35,6 @@ The broader aim is to improve **reproducibility and methodological transparency*
 
 ---
 
-## Repository Structure
-
-```
-betaGaitMultiverse/
-
-├── data/                   # Processed data outputs (not raw BIDS data) 
-│   ├── segmented/
-│   ├── clean/
-│   ├── pre_ica/
-│   └── ica_clean/
-
-├── scripts/                # Main analysis scripts (executed by the user)
-│   ├── segment_dataset.py
-│   ├── sig_cleaning.py
-│   ├── data_prep.py
-│   └── ica.py
-
-├── src/                    # Reusable functions used by scripts
-│   ├── config.py
-│   ├── segmentation.py
-│   ├── sig_cleaning_funcs.py
-│   ├── data_prep_funcs.py
-│   └── ica_utils.py
-
-├── notebooks/              # Exploratory analyses and visualization
-│
-├── .venv/                  # Python virtual environment (not tracked)
-│
-└── README.md
-```
-
-The repository separates **execution scripts** (`scripts/`) from **reusable functions** (`src/`).
-This structure makes the pipeline easier to maintain, reuse, and extend.
-
----
-
 ## Data Structure
 
 The pipeline uses mobile EEG data stored in **BIDS format**.
@@ -142,7 +106,6 @@ data/d00_raw
         ├── sub-S18_task-task_eeg.set
         ├── sub-S18_task-task_events.tsv
         └── sub-S18_task-task_channels.tsv
-```
 ```
 
 ---
