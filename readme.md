@@ -84,6 +84,40 @@ Time-frequency and gait-cycle analyses
 
 ---
 
+```mermaid
+flowchart LR
+
+A["00_download_openneuro_dataset.py"]
+B["01_segment_dataset.py"]
+C["02_sig_cleaning.py"]
+D["03_data_preica.py"]
+E["04_ica.py"]
+F["Outcome - Beta over gait cycle"]
+
+A --> B --> C --> D --> E --> F
+
+%% Descriptions
+A_note["Download OpenNeuro dataset"]
+B_note["Functions<br/>src/segmentation.py<br/>src/events.py<br/><br/>Extract experimental walking block<br/>Crop dataset and save segmented EEG"]
+C_note["Functions<br/>src/preprocessing.py<br/><br/>Remove non EEG channels<br/>High pass filter<br/>Notch filter<br/>Detect noisy channels<br/>Interpolate bad channels"]
+D_note["Functions<br/>src/preprocessing.py<br/><br/>Average reference<br/>Create fixed epochs 5 s<br/>Run AutoReject<br/>Visualize rejected epochs"]
+E_note["Functions<br/>src/ica_utils.py<br/><br/>Fit FastICA<br/>Run ICLabel classification<br/>Remove artifact components"]
+
+A --- A_note
+B --- B_note
+C --- C_note
+D --- D_note
+E --- E_note
+
+%% Colors
+style A fill:#A9A9A9,stroke:#333,color:#000
+style B fill:#FFB6C1,stroke:#333,color:#000
+style C fill:#FF8C42,stroke:#333,color:#000
+style D fill:#20B2AA,stroke:#333,color:#000
+style E fill:#9370DB,stroke:#333,color:#000
+style F fill:#3CB371,stroke:#333,color:#000
+```
+
 ## Downloading dataset
 
 Script:
