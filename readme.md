@@ -98,10 +98,10 @@ A --> B --> C --> D --> E --> F
 
 %% Descriptions
 A_note["Download OpenNeuro dataset"]
-B_note["Functions<br/>src/segmentation.py<br/>src/events.py<br/><br/>Extract experimental walking block<br/>Crop dataset and save segmented EEG"]
-C_note["Functions<br/>src/preprocessing.py<br/><br/>Remove non EEG channels<br/>High pass filter<br/>Notch filter<br/>Detect noisy channels<br/>Interpolate bad channels"]
-D_note["Functions<br/>src/preprocessing.py<br/><br/>Average reference<br/>Create fixed epochs 5 s<br/>Run AutoReject<br/>Visualize rejected epochs"]
-E_note["Functions<br/>src/ica_utils.py<br/><br/>Fit FastICA<br/>Run ICLabel classification<br/>Remove artifact components"]
+B_note["Extract experimental walking block<br/>Crop dataset and save segmented EEG"]
+C_note["Remove non EEG channels<br/>High pass filter<br/>Notch filter<br/>Detect noisy channels<br/>Interpolate bad channels"]
+D_note["Average reference<br/>Create fixed epochs 5 s<br/>Run AutoReject<br/>Visualize rejected epochs"]
+E_note["Fit FastICA<br/>Run ICLabel classification<br/>Remove artifact components"]
 
 A --- A_note
 B --- B_note
@@ -116,6 +116,73 @@ style C fill:#FF8C42,stroke:#333,color:#000
 style D fill:#20B2AA,stroke:#333,color:#000
 style E fill:#9370DB,stroke:#333,color:#000
 style F fill:#3CB371,stroke:#333,color:#000
+```
+
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{
+'fontSize':'22px'
+}}}%%
+
+flowchart LR
+
+A["00_download_openneuro_dataset.py"]
+D0[(OpenNeuro<br/>Dataset)]
+
+B["01_segment_dataset.py"]
+D1[(d01_segmented)]
+
+C["02_sig_cleaning.py"]
+D2[(d02_sigclean)]
+
+D["03_data_preica.py"]
+D3[(d03_preica)]
+
+E["04_ica.py"]
+D4[(d04_ica)]
+
+F["Outcome<br/>Beta over gait cycle"]
+
+D0 --> A --> B --> D1 --> C --> D2 --> D --> D3 --> E --> D4 --> F
+
+
+%% Script descriptions
+
+A_note["Download OpenNeuro dataset<br/>Convert to BIDS structure"]
+
+B_note["Extract walking block<br/>Crop dataset"]
+
+C_note["Remove non EEG channels<br/>High pass filter<br/>Notch filter<br/>Detect noisy channels<br/>Interpolate bad channels"]
+
+D_note["Average reference<br/>Create fixed epochs 5 s<br/>Run AutoReject<br/>Visualize rejected epochs"]
+
+E_note["Fit FastICA<br/>ICLabel classification<br/>Remove artifact components"]
+
+
+A --- A_note
+B --- B_note
+C --- C_note
+D --- D_note
+E --- E_note
+
+
+%% Script colors
+
+style A fill:#A9A9A9,stroke:#333,color:#000
+style B fill:#FFB6C1,stroke:#333,color:#000
+style C fill:#FF8C42,stroke:#333,color:#000
+style D fill:#20B2AA,stroke:#333,color:#000
+style E fill:#9370DB,stroke:#333,color:#000
+style F fill:#3CB371,stroke:#333,color:#000
+
+
+%% Dataset styling
+
+style D0 fill:#f0f0f0,stroke:#666
+style D1 fill:#f0f0f0,stroke:#666
+style D2 fill:#f0f0f0,stroke:#666
+style D3 fill:#f0f0f0,stroke:#666
+style D4 fill:#f0f0f0,stroke:#666
 ```
 
 ## Downloading dataset
@@ -412,3 +479,32 @@ Core packages:
 
 ---
 
+```mermaid
+gantt
+    title Multiverse Analysis of beta activity during gait - Timeline
+    dateFormat  YYYY-MM-DD
+    axisFormat  %b %Y
+
+    section Dataset Preparation
+    Identifying datasets          :done, a1, 2026-02-15, 14d
+    Exploring other possible datasets    :active, a2, after a1, 30d
+
+    section Preprocessing Pipeline
+    Preprocessing pipeline - dataset1    :active, b1, 2026-02-10, 30d
+    preprocessing pipeline on other datasets       :b2, after b1, 15d
+    Tweaking pipelines          :b3, after b2, 14d
+
+    section Neural Analysis
+    Beta power extraction               :c1, 2026-03-23, 7d
+    Time-frequency analysis (ERSP)      :c2, 2026-03-23, 7d
+    Gait-cycle normalization            :c3, 2026-03-23, 7d
+
+    section Multiverse Analysis
+    Define preprocessing parameters     :d1, 2026-03-11, 14d
+    Run multiverse pipelines            :d2, after d1, 25d
+    Compare preprocessing outcomes      :d3, after d2, 14d
+
+    section Manuscript
+    Figures and statistical analysis    :e1, 2026-04-30, 14d
+    Writing manuscript                  :e2, after e1, 21d
+```
