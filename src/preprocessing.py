@@ -130,7 +130,7 @@ def save_epochs(epochs_ar: mne.Epochs, output_dir: Path, subject: str):
     """
 
     output_dir.mkdir(exist_ok=True)
-    output_file = output_dir / f"sub-{subject}_preica_epo_raw.fif"
+    output_file = output_dir / f"sub-{subject}_preica_clean_epo.fif"
     epochs_ar.save(output_file, overwrite=True)
     print("Saved pre-ICA epochs →", output_file)
     return output_file
