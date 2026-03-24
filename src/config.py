@@ -11,7 +11,7 @@ def define_dir(root, *names):
 # Get the root directory of the repository (parent of 'src')
 dir_proj = Path(__file__).resolve().parents[1]
 
-# Define paths for data directories and work notebooks
+# Define paths for data directories 
 DIR_DATA = define_dir(dir_proj, "data") # Data folder
 DIR_RAWDATA = define_dir(DIR_DATA, "d00_raw") # Raw datasets
 DIR_MONTAGE = define_dir(DIR_DATA, "d00_montage") # Raw datasets with montage set
@@ -22,4 +22,6 @@ DIR_ICA = define_dir(DIR_DATA, "d04_ica") # Data after ICA
 DIR_GAIT = define_dir(DIR_DATA, "d05_gaitcycles") # Extracted and time-normalized gait cycles
 DIR_TFR = define_dir(DIR_DATA, "d06_tfr")
 DIR_ERSP = define_dir(DIR_DATA, "d07_ersp")
-DIR_PLOT = define_dir(DIR_DATA, "d09_plotgaitbeta")
+
+DIR_RESULTS = define_dir(dir_proj, "results") # Results folder for group-level analyses and stats
+DIR_PLOTS = define_dir(DIR_RESULTS, "plots") # Plots from group-level analyses
