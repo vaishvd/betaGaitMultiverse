@@ -1,44 +1,30 @@
 import numpy as np
- 
- 
+
+
 def log_power(power: np.ndarray) -> np.ndarray:
     """Convert power to decibels (10 * log10). Input: (n_cycles, n_channels, n_freqs, n_timepoints)."""
     return 10 * np.log10(power)
- 
- 
-def baseline_correct(
-    power_db: np.ndarray,
-    baseline_pct: tuple[float, float] = (0.0, 0.1),
-) -> np.ndarray:
+
+
+def baseline_correct(power_db: np.ndarray) -> np.ndarray:
     """
-    Subtract a baseline from log-power, averaged across cycles.
- 
-    The baseline is the mean over a window defined as a fraction of the
-    normalized gait cycle (0.0–1.0). The default (0.0, 0.1) uses the first
-    10% of the cycle as baseline — a common choice when no separate rest
-    condition is available.
- 
-    For a proper pre-movement baseline, record a standing-still condition
-    and pass those cycles here instead.
- 
+    Baseline-correct log-power by subtracting the mean across ALL timepoints
+    and ALL cycles, per channel and frequency.
+
+    This is the standard approach when no separate rest condition is available.
+    It is equivalent to what EEGLAB's newtimef uses as its default baseline and
+    removes mean power level without assuming any part of the gait cycle is
+    "neutral". The result expresses each time-frequency point as deviation from
+    the cycle-averaged power at that frequency.
+
     Parameters
     ----------
-    power_db     : (n_cycles, n_channels, n_freqs, n_timepoints) in dB
-    baseline_pct : (start, end) as fraction of the cycle, e.g. (0.0, 0.1)
- 
+    power_db : (n_cycles, n_channels, n_freqs, n_timepoints) in dB
+
     Returns
     -------
     ersp : (n_cycles, n_channels, n_freqs, n_timepoints)
-           baseline-corrected, averaged across cycles
     """
-    n_timepoints = power_db.shape[-1]
-    t_start = int(np.round(baseline_pct[0] * n_timepoints))
-    t_end   = int(np.round(baseline_pct[1] * n_timepoints))
- 
-    # Average baseline across the window and across all cycles
-    # shape after mean: (1, n_channels, n_freqs, 1) — broadcasts cleanly
-    baseline = power_db[:, :, :, t_start:t_end].mean(axis=(0, 3), keepdims=True)
- 
-    ersp = power_db - baseline
-    return ersp  # (n_cycles, n_channels, n_freqs, n_timepoints)
- 
+    # Mean over all cycles and all timepoints → (1, n_channels, n_freqs, 1)
+    baseline = power_db.mean(axis=(0, 3), keepdims=True)
+    return power_db - baseline
