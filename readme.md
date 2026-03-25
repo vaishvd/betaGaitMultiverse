@@ -1,7 +1,7 @@
 # Multiverse Analysis of Beta Activity During Gait
 
 This repository implements a modular EEG analysis pipeline for studying cortical dynamics during **split-belt treadmill walking**.
-The primary scientific focus is **beta-band activity (≈13–30 Hz) across the gait cycle**, particularly the transition between **stance and swing phases**.
+The primary scientific focus is **beta-band activity (~13–30 Hz) across the gait cycle**, particularly the transition between **stance and swing phases**.
 
 The project explores how methodological decisions in EEG preprocessing influence neural results through a **multiverse analysis** approach. Instead of committing to a single preprocessing pipeline, multiple plausible pipelines are evaluated to determine how analysis choices affect conclusions.
 
@@ -77,112 +77,94 @@ Pre-ICA Preparation
       ↓
 Independent Component Analysis (ICA)
       ↓
-Clean EEG Data
+Clean Continuous EEG
       ↓
-Time-frequency and gait-cycle analyses
+Gait Cycle Extraction (RHS → RHS)
+      ↓
+Time Normalization (0–100% gait cycle)
+      ↓
+Time-Frequency Analysis (Beta band)
+      ↓
+ERSP Computation (baseline across cycles)
+      ↓
+Visualization (Beta over gait cycle)
 ```
 
 ---
 
 ```mermaid
-flowchart LR
+flowchart TD
 
-A["00_download_openneuro_dataset.py"]
-B["01_segment_dataset.py"]
-C["02_sig_cleaning.py"]
-D["03_data_preica.py"]
-E["04_ica.py"]
-F["Outcome - Beta over gait cycle"]
+%% ── RAW DATA ──────────────────────────────────────────────
+D0[(OpenNeuro\nDataset)]:::store
+A["00_download_openneuro_dataset.py"]:::raw
+B["01_segment_dataset.py"]:::raw
 
-A --> B --> C --> D --> E --> F
+D0 --> A --> B
+B --> D1[(d01 segmented)]:::store
 
-%% Descriptions
-A_note["Download OpenNeuro dataset"]
-B_note["Extract experimental walking block<br/>Crop dataset and save segmented EEG"]
-C_note["Remove non EEG channels<br/>High pass filter<br/>Notch filter<br/>Detect noisy channels<br/>Interpolate bad channels"]
-D_note["Average reference<br/>Create fixed epochs 5 s<br/>Run AutoReject<br/>Visualize rejected epochs"]
-E_note["Fit FastICA<br/>Run ICLabel classification<br/>Remove artifact components"]
+%% ── PRE-ICA SIGNAL CLEANING ───────────────────────────────
+subgraph SIG[" 02_sig_cleaning.py |  Pre-ICA — Signal Cleaning  "]
+  direction LR
+  C1["High-pass filter"]:::sig
+  C2["Notch filter"]:::sig
+  C1 --> C2 
+end
 
-A --- A_note
-B --- B_note
-C --- C_note
-D --- D_note
-E --- E_note
+D1 --> SIG
+SIG --> D2[(d02 sig-clean)]:::store
 
-%% Colors
-style A fill:#A9A9A9,stroke:#333,color:#000
-style B fill:#FFB6C1,stroke:#333,color:#000
-style C fill:#FF8C42,stroke:#333,color:#000
-style D fill:#20B2AA,stroke:#333,color:#000
-style E fill:#9370DB,stroke:#333,color:#000
-style F fill:#3CB371,stroke:#333,color:#000
-```
+%% ── PRE-ICA DATA PREPROCESSING ────────────────────────────
+subgraph PRE[" 03_data_preica.py |  Pre-ICA — Data Preprocessing  "]
+  direction LR
+  D_a["Bad channel\ndetection"]:::pre
+  D_b["Artifact\nrejection"]:::pre
+  D_c["Re-reference"]:::pre
+  D_a --> D_b --> D_c
+end
 
+D2 --> PRE
+PRE --> D3[(d03 pre-ICA)]:::store
 
-```mermaid
-%%{init: {'theme':'base','themeVariables':{
-'fontSize':'22px'
-}}}%%
+%% ── ICA ───────────────────────────────────────────────────
+subgraph ICA_BLK[" 04_ica.py |  ICA  "]
+  direction LR
+  E1["IC\ndecomposition"]:::ica
+  E2["IC\nrejection"]:::ica
+  E1 --> E2
+end
 
-flowchart LR
+D3 --> ICA_BLK
+ICA_BLK --> D4[(d04 ICA-clean)]:::store
 
-A["00_download_openneuro_dataset.py"]
-D0[(OpenNeuro<br/>Dataset)]
+%% ── GAIT ANALYSIS ─────────────────────────────────────────
+subgraph GAIT["  Gait Analysis  "]
+  direction TB
+  F["05_extract gait cycles.py\n─────────────────\nRHS→RHS · time-normalise 0–100%"]:::post
+  G["06tfr.py\n─────────────────\nMorlet wavelets · beta band 13–30 Hz"]:::post
+  H["07_ersp.py\n─────────────────\nlog power · whole-mean baseline"]:::post
+  I["08_plotbetagait.py\n─────────────────\nERSP heatmap · gait phase markers"]:::out
+  F --> G --> H --> I
+end
 
-B["01_segment_dataset.py"]
-D1[(d01_segmented)]
+D4 --> GAIT
 
-C["02_sig_cleaning.py"]
-D2[(d02_sigclean)]
+D5[(d05 gait cycles)]:::store
+D6[(d06 TFR)]:::store
+D7[(d07 ERSP)]:::store
 
-D["03_data_preica.py"]
-D3[(d03_preica)]
+F --> D5
+G --> D6
+H --> D7
 
-E["04_ica.py"]
-D4[(d04_ica)]
-
-F["Outcome<br/>Beta over gait cycle"]
-
-D0 --> A --> B --> D1 --> C --> D2 --> D --> D3 --> E --> D4 --> F
-
-
-%% Script descriptions
-
-A_note["Download OpenNeuro dataset<br/>Convert to BIDS structure"]
-
-B_note["Extract walking block<br/>Crop dataset"]
-
-C_note["Remove non EEG channels<br/>High pass filter<br/>Notch filter<br/>Detect noisy channels<br/>Interpolate bad channels"]
-
-D_note["Average reference<br/>Create fixed epochs 5 s<br/>Run AutoReject<br/>Visualize rejected epochs"]
-
-E_note["Fit FastICA<br/>ICLabel classification<br/>Remove artifact components"]
-
-
-A --- A_note
-B --- B_note
-C --- C_note
-D --- D_note
-E --- E_note
-
-
-%% Script colors
-
-style A fill:#A9A9A9,stroke:#333,color:#000
-style B fill:#FFB6C1,stroke:#333,color:#000
-style C fill:#FF8C42,stroke:#333,color:#000
-style D fill:#20B2AA,stroke:#333,color:#000
-style E fill:#9370DB,stroke:#333,color:#000
-style F fill:#3CB371,stroke:#333,color:#000
-
-
-%% Dataset styling
-
-style D0 fill:#f0f0f0,stroke:#666
-style D1 fill:#f0f0f0,stroke:#666
-style D2 fill:#f0f0f0,stroke:#666
-style D3 fill:#f0f0f0,stroke:#666
-style D4 fill:#f0f0f0,stroke:#666
+%% ── STYLING ───────────────────────────────────────────────
+classDef raw  fill:#A9A9A9,stroke:#666,color:#000
+classDef sig  fill:#FF8C42,stroke:#c55,color:#000
+classDef pre  fill:#20B2AA,stroke:#0e7a74,color:#000
+classDef ica  fill:#9370DB,stroke:#6a4db5,color:#fff
+classDef post fill:#D9534F,stroke:#a33,color:#fff
+classDef out  fill:#3CB371,stroke:#277a4d,color:#fff
+classDef store fill:#f5f5f0,stroke:#aaa,color:#444
 ```
 
 ## Downloading dataset
@@ -328,7 +310,7 @@ scripts/04_ica.py
 Functions:
 
 ```
-src/ica_utils.py
+src/ica.py
 ```
 
 Purpose:
@@ -359,7 +341,128 @@ Visualizations include:
 * Removed components summary
 
 ---
+## 5. Gait Cycle Extraction
+Script:
 
+```
+scripts/05_extract_gait_cycles.py
+```
+
+Functions:
+
+```
+src/gait_cycles.py
+```
+
+Purpose:
+
+Extract gait cycles from continuous EEG using gait events and normalize them in time.
+
+Steps:
+
+1. Load ICA-cleaned continuous EEG
+2. Load gait events (RHS, LHS, RTO, LTO)
+3. Extract gait cycles (RHS → RHS)
+4. Time-normalize each cycle to a fixed length (e.g., 0–100%)
+5. Save normalized gait cycles
+
+Output:
+
+```
+data/d05_gaitepochs/sub-XX_gait_cycles.npy
+```
+---
+## 6. Time-Frequency Analysis
+
+Script:
+
+```
+scripts/06_tfr.py
+```
+
+Functions:
+
+```
+src/tfr.py
+```
+
+Purpose:
+
+Compute time–frequency representations (TFR) of gait-normalized EEG data.
+
+Steps:
+
+1. Load normalized gait cycles
+2. Compute time-frequency decomposition
+3. Focus on beta band (13–30 Hz)
+4. Save spectral power
+
+Output:
+
+```
+data/d06_tfr/sub-XX_tfr_beta.npy
+```
+---
+## 7. ERSP Computation
+
+Script:
+
+```
+scripts/07_ersp.py
+```
+
+Functions:
+
+```
+src/ersp.py
+```
+
+Purpose:
+
+Compute event-related spectral perturbation (ERSP) across gait cycles.
+
+Steps:
+
+1. Load TFR data
+2. Apply log transformation
+3. Normalize using baseline across all gait cycles
+4. Compute average ERSP
+Output:
+
+```
+data/d07_ersp/sub-XX_ersp_beta.npy
+```
+---
+## 8. Plotting and Visualization
+
+Script:
+
+```
+scripts/08_plotbetagait.py
+```
+
+Functions:
+
+```
+src/plot.py
+```
+
+Purpose:
+
+Visualize beta-band modulation across the gait cycle.
+
+Steps:
+
+1. Load ERSP data
+2. Plot beta power across normalized gait cycle (0–100%)
+3. Highlight gait phases (stance, swing)
+4. Save figures
+Output:
+
+```
+results/plots/sub-XX_beta_gait_cycle.png
+```
+---
 ## Multiverse Analysis
 
 Traditional EEG pipelines rely on a **single preprocessing path**.
