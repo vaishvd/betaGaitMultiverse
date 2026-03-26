@@ -5,7 +5,7 @@ from src.gait_cycles import (
     load_events,
     filter_condition,
     extract_rhs_cycles,
-    extract_lhs_onsets,
+    extract_lto_onsets,
     extract_cycle_simple,
     extract_cycle_twophase,
     print_cycle_qc,
@@ -26,7 +26,7 @@ for sub in SUBJECTS:
     events_df = load_events(DIR_RAWDATA / f"sub-{sub}/eeg/sub-{sub}_task-task_events.tsv")
     events_df = filter_condition(events_df, "B3", "End B3")
     cycles    = extract_rhs_cycles(events_df)   # list of (start_sec, end_sec)
-    lto       = extract_lhs_onsets(events_df)   # array of toe-off times, or None
+    lto       = extract_lto_onsets(events_df)   # array of toe-off times, or None
 
     all_cycles_simple   = []
     all_cycles_twophase = []
@@ -47,10 +47,10 @@ for sub in SUBJECTS:
 
         # Two-phase normalization (only if toe-off events are available)
         if lto is not None:
-            toe_offs_in_cycle = lto[(lto >= start_sec) & (lto < end_sec)]
-            if len(toe_offs_in_cycle) == 1:
+            lto_in_cycle = lto[(lto >= start_sec) & (lto < end_sec)]
+            if len(lto_in_cycle) == 1:
                 result = extract_cycle_twophase(
-                    raw, start_sec, end_sec, toe_offs_in_cycle[0],
+                    raw, start_sec, end_sec, lto_in_cycle[0],
                     sfreq, N_STANCE, N_SWING
                 )
                 if result is not None:

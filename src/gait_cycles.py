@@ -28,7 +28,7 @@ def extract_rhs_cycles(events_df) -> list[tuple[float, float]]:
     return [(rhs[i], rhs[i + 1]) for i in range(len(rhs) - 1)]
 
 
-def extract_lhs_onsets(events_df) -> np.ndarray | None:
+def extract_lto_onsets(events_df) -> np.ndarray | None:
     """
     Return LTO (left toe-off) onset times in seconds, or None if not present.
     Used for two-phase normalization.
