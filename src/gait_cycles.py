@@ -28,14 +28,14 @@ def extract_rhs_cycles(events_df) -> list[tuple[float, float]]:
     return [(rhs[i], rhs[i + 1]) for i in range(len(rhs) - 1)]
 
 
-def get_toe_off_onsets(events_df) -> np.ndarray | None:
+def extract_lhs_onsets(events_df) -> np.ndarray | None:
     """
-    Return RTO (right toe-off) onset times in seconds, or None if not present.
+    Return LTO (left toe-off) onset times in seconds, or None if not present.
     Used for two-phase normalization.
     """
-    if "RTO" not in events_df["value"].values:
+    if "LTO" not in events_df["value"].values:
         return None
-    return events_df[events_df["value"] == "RTO"]["onset"].to_numpy(dtype=float)
+    return events_df[events_df["value"] == "LTO"]["onset"].to_numpy(dtype=float)
 
 
 def time_normalize(data: np.ndarray, n_points: int) -> np.ndarray:

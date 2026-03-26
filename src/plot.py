@@ -6,12 +6,12 @@ import matplotlib.transforms as mtransforms
 
 
 # Gait event positions as % of the RHS-to-RHS cycle (population averages).
-# RHS = 0% and 100%, RTO ~ 10%, LHS ~ 50%, LTO ~ 60%
+# RHS = 0% and 100%, LTO ~ 10%, LHS ~ 50%, RTO ~ 60%
 # Stance phase: 0–60% (right foot on ground), Swing phase: 60–100%
 STANCE_END_PCT = 60   # approximate end of right stance / start of right swing
-RTO_PCT        = 10   # right toe-off
+LTO_PCT        = 10   # left toe-off
 LHS_PCT        = 50   # left heel strike
-LTO_PCT        = 60   # left toe-off  (= STANCE_END_PCT for right leg)
+RTO_PCT        = 60   # right toe-off  (= STANCE_END_PCT for right leg)
 
 
 def plot_ersp_beta(
@@ -103,7 +103,7 @@ def plot_ersp_beta(
     ax_tf.axvspan(STANCE_END_PCT, 100,          color=SWING_COLOR,  alpha=0.08)
 
     # Event lines on heatmap
-    for pct, label in [(RTO_PCT, "RTO"), (LHS_PCT, "LHS"), (LTO_PCT, "LTO")]:
+    for pct, label in [(LTO_PCT, "LTO"), (LHS_PCT, "LHS"), (RTO_PCT, "RTO")]:
         ax_tf.axvline(pct, color=EVENT_COLOR, lw=0.9, ls="--", alpha=0.7)
 
     # RHS lines
@@ -134,7 +134,7 @@ def plot_ersp_beta(
 
     # Event lines + labels on trace
     # Place labels just above the top of the axes using transData + offset
-    for pct, label in [(RTO_PCT, "RTO"), (LHS_PCT, "LHS"), (LTO_PCT, "LTO")]:
+    for pct, label in [(LTO_PCT, "LTO"), (LHS_PCT, "LHS"), (RTO_PCT, "RTO")]:
         ax_trace.axvline(pct, color=EVENT_COLOR, lw=0.9, ls="--", alpha=0.7)
         ax_trace.text(pct, ylims[1] * 0.97, label,
                       fontsize=7.5, color=EVENT_COLOR,
