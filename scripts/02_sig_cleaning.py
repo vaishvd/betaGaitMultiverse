@@ -13,14 +13,9 @@ This script executes the following preprocessing steps:
 from pathlib import Path
 import mne
 from src.config import DIR_DATA, DIR_SEG
-from src.preprocessing import (
-    prepare_eeg_channels,
-    highpass_filter,
-    notch_filter
-)
+from src.preprocessing import prepare_eeg_channels
 
 L_FREQ = 1.0
-BAD_CHAN_THRESHOLD = 3.0
 
 INPUT_DIR = DIR_SEG
 OUTPUT_DIR = DIR_DATA / "d02_sigclean"
@@ -43,10 +38,10 @@ for subject in SUBJECTS:
     raw = prepare_eeg_channels(raw)
 
     print("Applying high-pass filter")
-    raw = highpass_filter(raw, L_FREQ)
+    raw.filter(l_freq=L_FREQ, h_freq=None)
 
     print("Removing line noise")
-    raw = notch_filter(raw)
+    raw.notch_filter(freqs= (60, 100))
 
     output_file = OUTPUT_DIR / f"sub-{subject}_clean_raw.fif"
 

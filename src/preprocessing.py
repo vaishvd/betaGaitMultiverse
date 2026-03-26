@@ -24,23 +24,6 @@ def prepare_eeg_channels(raw):
 
     return raw
 
-
-def highpass_filter(raw, l_freq):
-    """
-    Apply high-pass filter before ICA.
-    """
-    raw.filter(l_freq=l_freq, h_freq=None)
-    return raw
-
-
-def notch_filter(raw, freqs=(50, 100)):
-    """
-    Remove line noise.
-    """
-    raw.notch_filter(freqs=freqs)
-    return raw
-
-
 def detect_bad_channels(raw, threshold=3.0):
     """
     Detect bad channels using variance outlier detection.
@@ -101,6 +84,15 @@ def create_fixed_length_epochs(raw: mne.io.BaseRaw, duration: float):
     events = mne.make_fixed_length_events(raw, id=1, duration=duration)
     epochs = mne.Epochs(raw, events, tmin=0, tmax=duration, baseline=None, preload=True)
     print(f"Created {len(epochs)} epochs of {duration} s each.")
+    return epochs
+
+def create_preica_epochs(raw, epoch_length):
+    import mne
+    epochs = mne.make_fixed_length_epochs(
+        raw,
+        duration=epoch_length,
+        preload=True
+    )
     return epochs
 
 def run_autoreject(epochs: mne.Epochs, n_interpolate=[1, 2, 3, 4], random_state=11, plot = True):
