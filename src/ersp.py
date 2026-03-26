@@ -28,3 +28,17 @@ def baseline_correct(power_db: np.ndarray) -> np.ndarray:
     # Mean over all cycles and all timepoints → (1, n_channels, n_freqs, 1)
     baseline = power_db.mean(axis=(0, 3), keepdims=True)
     return power_db - baseline
+
+def baseline_per_cycle(tfr):
+    # tfr shape: (n_cycles, n_channels, n_freqs, n_times)
+
+    import numpy as np
+
+    baseline = np.mean(tfr, axis=-1, keepdims=True)  # mean over time per cycle
+    return 10 * np.log10(tfr / baseline)
+
+def baseline_global(tfr):
+    import numpy as np
+
+    baseline = np.mean(tfr, axis=(0, -1), keepdims=True)
+    return 10 * np.log10(tfr / baseline)
