@@ -4,7 +4,6 @@ from src.config import DIR_TFR, DIR_ERSP
 from src.ersp import log_power, baseline_correct
 
 SUBJECTS = ["S18"]
-DIR_ERSP.mkdir(exist_ok=True)
 
 for sub in SUBJECTS:
     print(f"\nProcessing {sub}")

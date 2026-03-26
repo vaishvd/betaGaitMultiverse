@@ -7,7 +7,6 @@ from src.plot import plot_ersp_beta
 SUBJECTS  = ["S18"]
 CHANNELS   = ["C31","A30", "C32"]   # channels of interest — change to any labels in your montage
 FREQS     = np.arange(13, 31)
-DIR_PLOTS.mkdir(exist_ok=True)
 
 for sub in SUBJECTS:
     print(f"\nProcessing {sub}")

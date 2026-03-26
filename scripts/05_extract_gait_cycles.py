@@ -12,7 +12,6 @@ from src.gait_cycles import (
 )
 
 SUBJECTS = ["S18"]
-DIR_GAIT.mkdir(exist_ok=True)
 
 N_TOTAL  = 200  # time points per cycle (simple normalization)
 N_STANCE = 120  # time points for stance phase (~60% of cycle)

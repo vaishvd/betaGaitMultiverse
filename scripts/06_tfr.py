@@ -4,7 +4,6 @@ from src.config import DIR_GAIT, DIR_TFR, DIR_ICA
 from src.tfr import compute_tfr
 
 SUBJECTS = ["S18"]
-DIR_TFR.mkdir(exist_ok=True)
 
 FREQS = np.arange(13, 31)  # beta band: 13–30 Hz
 
