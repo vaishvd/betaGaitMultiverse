@@ -1,50 +1,59 @@
-"""
-Pre-ICA signal cleaning.
-
-This script executes the following preprocessing steps:
-1. Load segmented data
-2. Select only EEG channels
-3. Apply high-pass filter
-4. Remove line-noise
-5. Save clean data
-
-"""
-
-from pathlib import Path
 import mne
-from src.config import DIR_DATA, DIR_SEG
-from src.preprocessing import prepare_eeg_channels
+import numpy as np
+import matplotlib.pyplot as plt
+from src.config import DIR_SEG, DIR_DATA
 
-L_FREQ = 1.0
-
-INPUT_DIR = DIR_SEG
+INPUT_DIR  = DIR_SEG
 OUTPUT_DIR = DIR_DATA / "d02_sigclean"
-OUTPUT_DIR.mkdir(exist_ok=True)
 
+TARGET_SFREQ = 512  
+L_FREQ       = 1.0  
+LINE_FREQS   = [60]  
 
-# Run only one subject
 SUBJECTS = ["S18"]
 
-
 for subject in SUBJECTS:
+    print(f"\nProcessing {subject}")
 
-    print(f"\nProcessing subject {subject}")
+    raw = mne.io.read_raw_fif(
+        INPUT_DIR / f"sub-{subject}_preadapt_raw.fif", preload=True
+    )
 
-    raw_file = INPUT_DIR / f"sub-{subject}_preadapt_raw.fif"
+    # Pick EEG channels only
+    raw.pick("eeg")
 
-    raw = mne.io.read_raw_fif(raw_file, preload=True)
+    # Strip "1-" prefix added by BioSemi BDF import if present
+    rename = {ch: ch.replace("1-", "", 1) for ch in raw.ch_names}
+    raw.rename_channels(rename)
 
-    print("Preparing EEG channels")
-    raw = prepare_eeg_channels(raw)
+    # Montage
+    montage = mne.channels.make_standard_montage("biosemi128")
+    raw.set_montage(montage, on_missing="warn")
+    print(f"  Channels: {len(raw.ch_names)} | sfreq: {raw.info['sfreq']:.0f} Hz")
+    # Visualize the montage
+    fig = montage.plot(kind='topomap', show_names=True)
 
-    print("Applying high-pass filter")
-    raw.filter(l_freq=L_FREQ, h_freq=None)
+    # Downsample
+    if raw.info["sfreq"] != TARGET_SFREQ:
+        raw.resample(TARGET_SFREQ)
+        print(f"  Downsampled → {TARGET_SFREQ} Hz")
 
-    print("Removing line noise")
-    raw.notch_filter(freqs= (60, 100))
+    # High-pass filter
+    raw.filter(l_freq=L_FREQ, h_freq=None, method="fir", fir_window="hamming")
+    print(f"  High-pass filtered at {L_FREQ} Hz")
 
-    output_file = OUTPUT_DIR / f"sub-{subject}_clean_raw.fif"
+    # Notch filter
+    raw.notch_filter(freqs=LINE_FREQS)
+    print(f"  Notch filtered at {LINE_FREQS} Hz")
 
-    raw.save(output_file, overwrite=True)
+    # PSD check 
+    fig = raw.compute_psd(fmax=80).plot(show=False)
+    fig.savefig(OUTPUT_DIR / f"sub-{subject}_psd_sigclean.png", dpi=100)
+    import matplotlib.pyplot as plt
+    plt.close(fig)
 
-    print("Saved cleaned data →", output_file)
+    out = OUTPUT_DIR / f"sub-{subject}_clean_raw.fif"
+    raw.save(out, overwrite=True)
+    fig.savefig(OUTPUT_DIR / f"sub-{subject}_montage_layout.png", dpi=300)
+    print(f"  Saved → {out.name}")
+
