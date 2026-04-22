@@ -4,67 +4,47 @@ from src.config import DIR_ICA, DIR_RAWDATA, DIR_GAIT
 from src.gait_cycles import (
     load_events,
     filter_condition,
-    extract_rhs_cycles,
-    extract_lto_onsets,
-    extract_cycle_simple,
-    extract_cycle_twophase,
-    print_cycle_qc,
+    rhs_cycles,
+    extract_cycles,
+    plot_cycle_diagnostics
 )
 
 SUBJECTS = ["S18"]
+N_POINTS = 512  # time points for time-normalisation (512 = 2 s at 256 Hz) 
+MIN_DUR  = 0.5   
+MAX_DUR  = 2.5   
 
-N_TOTAL  = 200  # time points per cycle (simple normalization)
-N_STANCE = 120  # time points for stance phase (~60% of cycle)
-N_SWING  =  80  # time points for swing phase  (~40% of cycle)
 
 for sub in SUBJECTS:
-    print(f"\nProcessing {sub}")
+    print(f"\n {sub} - Extracting gait cycles")
 
+    # Load raw data (after ICA cleaning)
     raw = mne.io.read_raw_fif(DIR_ICA / f"sub-{sub}_desc-clean_raw.fif", preload=True)
-    sfreq = raw.info["sfreq"]
 
-    events_df = load_events(DIR_RAWDATA / f"sub-{sub}/eeg/sub-{sub}_task-task_events.tsv")
-    events_df = filter_condition(events_df, "B3", "End B3")
-    cycles    = extract_rhs_cycles(events_df)   # list of (start_sec, end_sec)
-    lto       = extract_lto_onsets(events_df)   # array of toe-off times, or None
+    # Load events; subtract raw.first_time to align onsets to the EEG time axis
+    events = load_events(DIR_RAWDATA / f"sub-{sub}/eeg/sub-{sub}_task-task_events.tsv")
+    events["onset"] -= raw.first_time
+    events = filter_condition(events, "B3", "End B3")
 
-    all_cycles_simple   = []
-    all_cycles_twophase = []
-    cycle_durations     = []
+    cycles = rhs_cycles(events)
+    print(f"  RHS cycles : {len(cycles)}")
 
-    for start_sec, end_sec in cycles:
+    # Diagnostic: raw alignment before any rejection
+    plot_cycle_diagnostics(cycles, raw, DIR_GAIT / f"sub-{sub}_cycle_diagnostics.png")
 
-        if int(np.round(end_sec * sfreq)) > raw.n_times:
-            print(f"  Skipping cycle at {start_sec:.2f}s — beyond recording end")
-            continue
+    # Extract, reject, and time-normalise cycles
+    all_cycles, durations = extract_cycles(
+        raw, cycles, raw.info["sfreq"], MIN_DUR, MAX_DUR, N_POINTS, k=3.0,
+    )
 
-        cycle_durations.append(end_sec - start_sec)
+    if all_cycles is None:
+        print("  No cycles extracted — skipping.")
+        continue
 
-        # Simple whole-cycle normalization
-        all_cycles_simple.append(
-            extract_cycle_simple(raw, start_sec, end_sec, sfreq, N_TOTAL)
-        )
+    print(f"  Cycles kept : {len(all_cycles)}")
+    print(f"  Duration    : {durations.mean():.2f} ± {durations.std():.2f} s")
 
-        # Two-phase normalization (only if toe-off events are available)
-        if lto is not None:
-            lto_in_cycle = lto[(lto >= start_sec) & (lto < end_sec)]
-            if len(lto_in_cycle) == 1:
-                result = extract_cycle_twophase(
-                    raw, start_sec, end_sec, lto_in_cycle[0],
-                    sfreq, N_STANCE, N_SWING
-                )
-                if result is not None:
-                    all_cycles_twophase.append(result)
-
-    # Save and report
-    all_cycles_simple = np.stack(all_cycles_simple)  # (n_cycles, n_channels, N_TOTAL)
-    print(f"  Extracted {all_cycles_simple.shape[0]} cycles, shape {all_cycles_simple.shape[1:]}")
-    print_cycle_qc(cycle_durations)
-
-    np.save(DIR_GAIT / f"sub-{sub}_gait_cycles.npy", all_cycles_simple)
-    print(f"  Saved simple-normalized cycles → sub-{sub}_gait_cycles.npy")
-
-    if all_cycles_twophase:
-        all_cycles_twophase = np.stack(all_cycles_twophase)  # (n_cycles, n_channels, N_STANCE + N_SWING)
-        np.save(DIR_GAIT / f"sub-{sub}_gait_cycles_twophase.npy", all_cycles_twophase)
-        print(f"  Saved two-phase-normalized cycles → sub-{sub}_gait_cycles_twophase.npy")
+    # Save cycles and average
+    np.save(DIR_GAIT / f"sub-{sub}_gait_cycles.npy", all_cycles)   # (n, ch, time)
+    np.save(DIR_GAIT / f"sub-{sub}_gait_avg.npy",    all_cycles.mean(axis=0))  # (ch, time)
+    print(f"  Saved : {all_cycles.shape}")
