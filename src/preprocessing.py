@@ -76,6 +76,34 @@ def rereference_raw(raw: mne.io.BaseRaw, ref_type="average", plot=True):
         raw.plot(scalings=dict(eeg=100e-6), title=f"EEG after {ref_type} reference")
     return raw
 
+def apply_asr(
+    raw: mne.io.BaseRaw,
+    cutoff: float = 20.0,
+) -> mne.io.BaseRaw:
+    """
+    Apply Artifact Subspace Reconstruction (ASR) to continuous raw EEG data.
+
+    Parameters
+    ----------
+    raw : mne.io.BaseRaw
+        Continuous raw EEG data, already rereferenced. Must be preloaded.
+    cutoff : float, optional
+        ASR cutoff in standard deviations. Default is 20.0.
+        Lower = more aggressive cleaning (recommended range: 15–25 for gait EEG).
+
+    Returns
+    -------
+    raw : mne.io.BaseRaw
+        Raw object with ASR applied.
+    """
+    from asrpy import ASR
+
+    asr = ASR(sfreq=raw.info["sfreq"], cutoff=cutoff)
+    asr.fit(raw)
+    raw = asr.transform(raw)
+
+    return raw
+
 def create_fixed_length_epochs(raw: mne.io.BaseRaw, duration: float):
     """
     Create fixed-length epochs of given duration from raw data
