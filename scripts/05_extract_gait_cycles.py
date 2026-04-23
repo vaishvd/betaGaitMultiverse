@@ -10,16 +10,15 @@ from src.gait_cycles import (
 )
 
 SUBJECTS = ["S18"]
-N_POINTS = 512  # time points for time-normalisation (512 = 2 s at 256 Hz) 
 MIN_DUR  = 0.5   
 MAX_DUR  = 2.5   
-
 
 for sub in SUBJECTS:
     print(f"\n {sub} - Extracting gait cycles")
 
     # Load raw data (after ICA cleaning)
     raw = mne.io.read_raw_fif(DIR_ICA / f"sub-{sub}_desc-clean_raw.fif", preload=True)
+    sfreq = raw.info["sfreq"]
 
     # Load events; subtract raw.first_time to align onsets to the EEG time axis
     events = load_events(DIR_RAWDATA / f"sub-{sub}/eeg/sub-{sub}_task-task_events.tsv")
@@ -29,22 +28,25 @@ for sub in SUBJECTS:
     cycles = rhs_cycles(events)
     print(f"  RHS cycles : {len(cycles)}")
 
-    # Diagnostic: raw alignment before any rejection
+    # Diagnostic plot: raw alignment before any rejection
     plot_cycle_diagnostics(cycles, raw, DIR_GAIT / f"sub-{sub}_cycle_diagnostics.png")
-
-    # Extract, reject, and time-normalise cycles
-    all_cycles, durations = extract_cycles(
-        raw, cycles, raw.info["sfreq"], MIN_DUR, MAX_DUR, N_POINTS, k=3.0,
-    )
-
-    if all_cycles is None:
-        print("  No cycles extracted — skipping.")
+ 
+    segments, durations = extract_cycles(raw, cycles, sfreq, MIN_DUR, MAX_DUR, k=3.0)
+ 
+    if segments is None:
+        print("  No cycles survived — skipping.")
         continue
-
-    print(f"  Cycles kept : {len(all_cycles)}")
+ 
+    print(f"  Cycles kept : {len(segments)}")
     print(f"  Duration    : {durations.mean():.2f} ± {durations.std():.2f} s")
-
-    # Save cycles and average
-    np.save(DIR_GAIT / f"sub-{sub}_gait_cycles.npy", all_cycles)   # (n, ch, time)
-    np.save(DIR_GAIT / f"sub-{sub}_gait_avg.npy",    all_cycles.mean(axis=0))  # (ch, time)
-    print(f"  Saved : {all_cycles.shape}")
+ 
+    # Segments are variable-length — pre-allocate object array to prevent
+    # NumPy from broadcasting into a 3D array when all strides share the same length
+    raw_arr = np.empty(len(segments), dtype=object)
+    for i, seg in enumerate(segments):
+        raw_arr[i] = seg
+ 
+    np.save(DIR_GAIT / f"sub-{sub}_gait_segments.npy",  raw_arr,   allow_pickle=True)
+    np.save(DIR_GAIT / f"sub-{sub}_gait_durations.npy", durations)
+    np.save(DIR_GAIT / f"sub-{sub}_gait_sfreq.npy",     sfreq)
+    print(f"  Saved : {len(segments)} segments, sfreq={sfreq} Hz")
