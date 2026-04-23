@@ -1,20 +1,31 @@
 import numpy as np
-
 from src.config import DIR_TFR, DIR_ERSP
-from src.ersp import log_power, baseline_correct
 
-SUBJECTS = ["S18"]
+SUBJECTS       = ["S18"]
+BASELINE   = (0, 10)     # % gait cycle — early stance, closest to rest - baceline window
+
 
 for sub in SUBJECTS:
-    print(f"\nProcessing {sub}")
+    print(f"\n {sub} ERSP computation")
 
-    power = np.load(DIR_TFR / f"sub-{sub}_tfr_beta.npy")
-    # shape: (n_cycles, n_channels, n_freqs, n_timepoints)
+    # (n_cycles, channels, freqs, n_points) — linear power
+    tfr = np.load(DIR_TFR / f"sub-{sub}_tfr_beta.npy")
 
-    power_db = log_power(power)
-    ersp     = baseline_correct(power_db)
-    # Baseline: mean across ALL cycles and timepoints per channel/frequency.
-    # This removes mean power level without assuming any cycle phase is neutral.
+    n_points = tfr.shape[-1]
+    b0 = int(BASELINE[0] / 100 * n_points)
+    b1 = int(BASELINE[1] / 100 * n_points)
 
-    np.save(DIR_ERSP / f"sub-{sub}_ersp_beta.npy", ersp)
-    print(f"  ERSP shape {ersp.shape} → saved sub-{sub}_ersp_beta.npy")
+    # Baseline: mean linear power in early stance window, per cycle/channel/freq
+    # Averaging in linear space before log conversion avoids log-space bias
+    baseline = tfr[..., b0:b1].mean(axis=-1, keepdims=True)   # (n, ch, fr, 1)
+
+    ersp     = 10 * np.log10(tfr / baseline)                  # (n, ch, fr, n_points)
+    ersp_avg = ersp.mean(axis=0)                               # (ch, fr, n_points)
+
+    print(f"  Baseline window : {BASELINE[0]}–{BASELINE[1]}% of cycle "
+          f"({b1 - b0} samples)")
+    print(f"  Shape  : {ersp_avg.shape}, any nan: {np.isnan(ersp_avg).any()}")
+    print(f"  Range  : {ersp_avg.min():.2f} / {ersp_avg.max():.2f} dB")
+
+    np.save(DIR_ERSP / f"sub-{sub}_ersp_beta.npy", ersp_avg)
+    print(f"  Saved → sub-{sub}_ersp_beta.npy")
