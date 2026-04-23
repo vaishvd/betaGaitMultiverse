@@ -10,7 +10,7 @@ EDGE_CROP = 0.05                             # fraction trimmed at each edge pos
 
 
 for sub in SUBJECTS:
-    print(f"\n── {sub} ──")
+    print(f"\n {sub} TFR computation")
 
     segments = np.load(DIR_GAIT / f"sub-{sub}_gait_segments.npy", allow_pickle=True)
     sfreq    = float(np.load(DIR_GAIT / f"sub-{sub}_gait_sfreq.npy"))
