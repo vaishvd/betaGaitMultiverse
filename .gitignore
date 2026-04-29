@@ -1,5 +1,5 @@
 .venv/
-data/
+datasets/
 __pycache__/
 *.fdt
 *.set

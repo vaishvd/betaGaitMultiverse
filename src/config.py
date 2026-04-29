@@ -9,19 +9,57 @@ def define_dir(root, *names):
     return path
 
 # Get the root directory of the repository (parent of 'src')
-dir_proj = Path(__file__).resolve().parents[1]
+DIR_PROJ = Path(__file__).resolve().parents[1]
 
 # Define paths for data directories 
-DIR_DATA = define_dir(dir_proj, "data") # Data folder
-DIR_RAWDATA = define_dir(DIR_DATA, "d00_raw") # Raw datasets
-DIR_MONTAGE = define_dir(DIR_DATA, "d00_montage") # Raw datasets with montage set
-DIR_SEG = define_dir(DIR_DATA, "d01_segmented") # Datasets segmented with events of interest
-DIR_SIGCLEAN = define_dir(DIR_DATA, "d02_sigclean") # Data after signal cleaning
-DIR_PREICA = define_dir(DIR_DATA, "d03_preica") # Data before ICA
-DIR_ICA = define_dir(DIR_DATA, "d04_ica") # Data after ICA
-DIR_GAIT = define_dir(DIR_DATA, "d05_gaitcycles") # Extracted and time-normalized gait cycles
-DIR_TFR = define_dir(DIR_DATA, "d06_tfr")
-DIR_ERSP = define_dir(DIR_DATA, "d07_ersp")
+DIR_DATASETS = define_dir(DIR_PROJ, "datasets")
+DIR_RESULTS  = define_dir(DIR_PROJ, "results")
+DIR_PLOTS    = define_dir(DIR_RESULTS, "plots")
 
-DIR_RESULTS = define_dir(dir_proj, "results") # Results folder for group-level analyses and stats
-DIR_PLOTS = define_dir(DIR_RESULTS, "plots") # Plots from group-level analyses
+# Dataset-specific directories will be defined in the DATASETS dict below, which allows for flexible handling of multiple datasets with different structures
+DATASETS = {
+
+    "splitbelt": {
+        "root": define_dir(DIR_DATASETS, "splitBeltFerris"),
+
+        # pipeline structure
+        "dirs": {
+            "raw":        "d00_raw",
+            "montage":    "d00_montage",
+            "seg":        "d01_segmented",
+            "sigclean":   "d02_sigclean",
+            "preica":     "d03_preica",
+            "ica":        "d04_ica",
+            "gait":       "d05_gaitcycles",
+            "tfr":        "d06_tfr",
+            "ersp":       "d07_ersp",
+        },
+
+        # dataset-specific parameters
+        "event_file": "eeg/sub-{sub}_task-task_events.tsv",
+        "condition_start": "B3",
+        "condition_end": "End B3",
+    },
+
+
+    "stepup": {
+        "root": define_dir(DIR_DATASETS, "stepupAms"),
+
+        "dirs": {
+            "raw":        "d00_raw",
+            "montage":    "d00_montage",
+            "seg":        "d01_segmented",
+            "sigclean":   "d02_sigclean",
+            "preica":     "d03_preica",
+            "ica":        "d04_ica",
+            "gait":       "d05_gaitcycles",
+            "tfr":        "d06_tfr",
+            "ersp":       "d07_ersp",
+        },
+
+        "event_file": "events/{sub}.tsv",
+        "condition_start": "Walk",
+        "condition_end": "Stop",
+    },
+
+}
