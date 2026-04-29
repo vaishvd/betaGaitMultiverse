@@ -21,6 +21,11 @@ def rhs_cycles(events: pd.DataFrame) -> list[tuple[float, float]]:
     return list(zip(onsets[:-1], onsets[1:]))
 
 
+def compute_durations(cycles: list[tuple[float, float]]) -> np.ndarray:
+    """Return stride durations in seconds."""
+    return np.array([end - start for start, end in cycles])
+
+
 # Cycle extraction & rejection
 
 def extract_cycles(
@@ -43,21 +48,6 @@ def extract_cycles(
         dur = end - start
         if not (min_dur <= dur <= max_dur):
             continue
- 
-        i0, i1 = int(start * sfreq), int(end * sfreq)
-        if i0 < 0 or i1 > raw.n_times:
-            continue
- 
-        data = raw.get_data(start=i0, stop=i1)
-        if data.shape[1] < 10:
-            continue
- 
-        segments.append(data)
-        durations.append(dur)
-        p2p.append(float(np.median(np.ptp(data, axis=1))))
- 
-    if not segments:
-        return None, None
  
     p2p_arr   = np.array(p2p)
     med       = np.median(p2p_arr)
@@ -93,23 +83,17 @@ def compute_event_means(
     return {ev: float(np.mean(vals)) if vals else None for ev, vals in event_map.items()}
 
 
-# Sanity check: plot raw cycles before any rejection
- 
-def plot_cycle_diagnostics(cycles: list[tuple[float, float]], raw, path) -> None:
-    """
-    Overlay first 20 raw cycles (channel 0) before any rejection —
-    verifies event-to-EEG alignment independently of artefact status.
-    """
-    sfreq = raw.info["sfreq"]
-    fig, ax = plt.subplots(figsize=(6, 4))
- 
-    for start, end in cycles[:20]:
-        data = raw.get_data(start=int(start * sfreq), stop=int(end * sfreq))
-        if data.shape[1] >= 10:
-            ax.plot(np.linspace(0, 100, data.shape[1]), data[0] * 1e6, alpha=0.2, lw=0.8)
- 
-    ax.set(xlabel="Gait cycle (%)", ylabel="Amplitude (µV)",
-           title="Raw cycle alignment — first 20 cycles (ch 0)")
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
+# Plotting
+
+def plot_duration_distribution(durations: np.ndarray, out_file):
+    """Histogram of gait cycle durations."""
+    plt.figure(figsize=(5, 3))
+
+    plt.hist(durations, bins=30)
+    plt.xlabel("Gait cycle duration (s)")
+    plt.ylabel("Count")
+    plt.title("Gait cycle duration distribution")
+
+    plt.tight_layout()
+    plt.savefig(out_file, dpi=150)
+    plt.close()
