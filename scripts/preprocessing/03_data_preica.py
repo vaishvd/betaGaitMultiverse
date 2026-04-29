@@ -1,10 +1,13 @@
 import mne
 import numpy as np
 from autoreject import AutoReject
-from src.config import DIR_SIGCLEAN, DIR_DATA
+from src.paths import get_dataset_dirs
 
-INPUT_DIR  = DIR_SIGCLEAN
-OUTPUT_DIR = DIR_DATA / "d03_preica"
+DATASET = "splitbelt"
+dirs = get_dataset_dirs(DATASET)
+
+INPUT_DIR  = dirs["sigclean"]
+OUTPUT_DIR = dirs["preica"]
 
 BAD_CHAN_THRESHOLD = 3.0  
 EPOCH_DURATION = 2.0 # seconds

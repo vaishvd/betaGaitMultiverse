@@ -1,10 +1,13 @@
 import mne
 from mne_icalabel import label_components
-from src.config import DIR_PREICA, DIR_SIGCLEAN, DIR_ICA
+from src.paths import get_dataset_dirs
 
-INPUT_EPOCHS = DIR_PREICA
-INPUT_RAW    = DIR_SIGCLEAN
-OUTPUT_DIR   = DIR_ICA
+DATASET = "splitbelt"
+dirs = get_dataset_dirs(DATASET)
+
+INPUT_RAW  = dirs["sigclean"]
+INPUT_EPOCHS = dirs["preica"]
+OUTPUT_DIR = dirs["ica"]
 
 ICA_METHOD    = "fastica"
 N_COMPONENTS  = 0.99

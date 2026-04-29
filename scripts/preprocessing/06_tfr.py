@@ -1,8 +1,12 @@
 import numpy as np
 import mne
-from src.config import DIR_GAIT, DIR_TFR
+from src.paths import get_dataset_dirs
 
+DATASET = "splitbelt"
 SUBJECTS  = ["S18"]
+
+dirs = get_dataset_dirs(DATASET)
+
 FREQS     = np.arange(13, 31, dtype=float)   # beta band (Hz)
 N_CYCLES  = FREQS / 2.0                      # frequency-dependent wavelet width
 N_POINTS  = 512                              # gait cycle % resolution
@@ -12,8 +16,8 @@ EDGE_CROP = 0.05                             # fraction trimmed at each edge pos
 for sub in SUBJECTS:
     print(f"\n {sub} TFR computation")
 
-    segments = np.load(DIR_GAIT / f"sub-{sub}_gait_segments.npy", allow_pickle=True)
-    sfreq    = float(np.load(DIR_GAIT / f"sub-{sub}_gait_sfreq.npy"))
+    segments = np.load(dirs["gait"] / f"sub-{sub}_gait_segments.npy", allow_pickle=True)
+    sfreq    = float(np.load(dirs["gait"] / f"sub-{sub}_gait_sfreq.npy"))
 
     tfr_cycles = []
     for data in segments:
@@ -44,5 +48,5 @@ for sub in SUBJECTS:
     tfr_cycles = np.stack(tfr_cycles)
     print(f"  Shape : {tfr_cycles.shape}, any nan: {np.isnan(tfr_cycles).any()}")
 
-    np.save(DIR_TFR / f"sub-{sub}_tfr_beta.npy", tfr_cycles)
+    np.save(dirs["tfr"] / f"sub-{sub}_tfr_beta.npy", tfr_cycles)
     print(f"  Saved → sub-{sub}_tfr_beta.npy")

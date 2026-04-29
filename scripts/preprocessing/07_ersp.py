@@ -1,7 +1,11 @@
 import numpy as np
-from src.config import DIR_TFR, DIR_ERSP
+from src.paths import get_dataset_dirs
 
-SUBJECTS       = ["S18"]
+DATASET = "splitbelt"
+SUBJECTS = ["S18"]
+
+dirs = get_dataset_dirs(DATASET)
+
 BASELINE   = (0, 10)     # % gait cycle — early stance, closest to rest - baceline window
 
 
@@ -9,7 +13,7 @@ for sub in SUBJECTS:
     print(f"\n {sub} ERSP computation")
 
     # (n_cycles, channels, freqs, n_points) — linear power
-    tfr = np.load(DIR_TFR / f"sub-{sub}_tfr_beta.npy")
+    tfr = np.load(dirs["tfr"] / f"sub-{sub}_tfr_beta.npy")
 
     n_points = tfr.shape[-1]
     b0 = int(BASELINE[0] / 100 * n_points)
@@ -27,5 +31,5 @@ for sub in SUBJECTS:
     print(f"  Shape  : {ersp_avg.shape}, any nan: {np.isnan(ersp_avg).any()}")
     print(f"  Range  : {ersp_avg.min():.2f} / {ersp_avg.max():.2f} dB")
 
-    np.save(DIR_ERSP / f"sub-{sub}_ersp_beta.npy", ersp_avg)
+    np.save(dirs["ersp"] / f"sub-{sub}_ersp_beta.npy", ersp_avg)
     print(f"  Saved → sub-{sub}_ersp_beta.npy")

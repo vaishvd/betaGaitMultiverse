@@ -1,10 +1,15 @@
 import mne
 import numpy as np
 import matplotlib.pyplot as plt
-from src.config import DIR_SEG, DIR_DATA
+from src.paths import get_dataset_dirs
 
-INPUT_DIR  = DIR_SEG
-OUTPUT_DIR = DIR_DATA / "d02_sigclean"
+DATASET = "splitbelt"
+SUBJECTS = ["S18"]
+
+dirs = get_dataset_dirs(DATASET)
+
+INPUT_DIR  = dirs["seg"]
+OUTPUT_DIR = dirs["sigclean"]
 
 TARGET_SFREQ = 512  
 L_FREQ       = 1.0  
