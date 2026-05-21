@@ -48,6 +48,7 @@ DATASETS = {
         "dirs": {
             "raw":        "d00_raw",
             "montage":    "d00_montage",
+            "gaitevents": "d00_gaitevents",
             "seg":        "d01_segmented",
             "sigclean":   "d02_sigclean",
             "preica":     "d03_preica",
