@@ -593,21 +593,21 @@ gantt
     Exploring other possible datasets    :active, a2, after a1, 30d
 
     section Preprocessing Pipeline
-    Preprocessing pipeline - dataset1    :active, b1, 2026-02-10, 30d
-    preprocessing pipeline on other datasets       :b2, after b1, 15d
-    Tweaking pipelines          :b3, after b2, 14d
+    Preprocessing pipeline - dataset1    :active, b1, 2026-02-10, 60d
+    preprocessing pipeline on other datasets       :b2, after b1, 30d
+    Tweaking pipelines          :b3, after b2, 15d
 
     section Neural Analysis
-    Beta power extraction               :c1, 2026-04-07, 20d
-    Time-frequency analysis (ERSP)      :c2, 2026-04-07, 20d
-    Gait-cycle normalization            :c3, 2026-04-07, 20d
+    Beta power extraction               :c1, 2026-04-07, 30d
+    Time-frequency analysis (ERSP)      :c2, 2026-04-07, 30d
+    Gait-cycle normalization            :c3, 2026-04-07, 30d
 
     section Multiverse Analysis
-    Define preprocessing parameters     :d1, 2026-03-11, 21d
-    Run multiverse pipelines            :d2, after d1, 25d
-    Compare preprocessing outcomes      :d3, after d2, 14d
+    Define preprocessing parameters     :d1, 2026-03-11, 45d
+    Run multiverse pipelines            :d2, after d1, 35d
+    Compare preprocessing outcomes      :d3, after d2, 30d
 
     section Manuscript
-    Figures and statistical analysis    :e1, 2026-05-15, 14d
-    Writing manuscript                  :e2, after e1, 21d
+    Figures and statistical analysis    :e1, 2026-06-15, 14d
+    Writing manuscript                  :e2, after e1, 31d
 ```
