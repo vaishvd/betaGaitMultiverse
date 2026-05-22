@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -128,21 +126,21 @@ print(f"RTO: {len(rto)}")
 events = []
 
 for e in lhs:
-    events.append([e / FS, "lhs"])
+    events.append([e / FS, e, "lhs"])
 
 for e in lto:
-    events.append([e / FS, "lto"])
+    events.append([e / FS, e, "lto"])
 
 for e in rhs:
-    events.append([e / FS, "rhs"])
+    events.append([e / FS, e, "rhs"])
 
 for e in rto:
-    events.append([e / FS, "rto"])
+    events.append([e / FS, e, "rto"])
 
 
 events_df = pd.DataFrame(
     events,
-    columns=["onset", "trial_type"]
+    columns=["onset","sample","trial_type"]
 )
 
 events_df = events_df.sort_values("onset")

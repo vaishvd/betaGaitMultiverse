@@ -10,6 +10,7 @@ dirs = get_dataset_dirs(DATASET)
 
 INPUT_DIR  = dirs["seg"]
 OUTPUT_DIR = dirs["sigclean"]
+MONTAGE_DIR = dirs["montage"]
 
 TARGET_SFREQ = 512  
 L_FREQ       = 1.0  
@@ -59,6 +60,6 @@ for subject in SUBJECTS:
 
     out = OUTPUT_DIR / f"sub-{subject}_clean_raw.fif"
     raw.save(out, overwrite=True)
-    fig.savefig(OUTPUT_DIR / f"sub-{subject}_montage_layout.png", dpi=300)
+    fig.savefig(MONTAGE_DIR / f"sub-{subject}_montage_layout.png", dpi=300)
     print(f"  Saved → {out.name}")
 
