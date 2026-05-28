@@ -1,11 +1,71 @@
 """
-This file contains the functions required to run each preprocessing step on segmented data before ICA
+Preprocessing utilities for EEG data.
+Covers every step from raw segmented data up to pre-ICA clean epochs.
 """
 
 import numpy as np
+import matplotlib.pyplot as plt
 import mne
 from autoreject import AutoReject
 from pathlib import Path
+
+
+def filter_raw(
+    raw: mne.io.BaseRaw,
+    target_sfreq: float = 512,
+    l_freq: float = 1.0,
+    line_freqs: list[float] | None = None,
+) -> mne.io.BaseRaw:
+    """
+    Resample, high-pass filter, and notch filter, all in-place.
+
+    Parameters
+    ----------
+    target_sfreq : resample target in Hz (skipped if already at target)
+    l_freq       : high-pass cutoff in Hz
+    line_freqs   : list of notch frequencies in Hz  (default: [50] for EU)
+    """
+    if line_freqs is None:
+        line_freqs = [50]
+
+    if raw.info["sfreq"] != target_sfreq:
+        raw.resample(target_sfreq)
+        print(f"  Resampled        → {target_sfreq} Hz")
+
+    raw.filter(l_freq=l_freq, h_freq=None, method="fir", fir_window="hamming")
+    print(f"  High-pass filter @ {l_freq} Hz")
+
+    raw.notch_filter(freqs=line_freqs)
+    print(f"  Notch filter     @ {line_freqs} Hz")
+
+    return raw
+
+
+def save_sigclean_raw(
+    raw: mne.io.BaseRaw,
+    output_dir: Path,
+    subject: str,
+) -> Path:
+    """
+    Save filtered, bad-channel-corrected, re-referenced raw to the
+    sigclean directory as sub-{subject}_clean_raw.fif.
+    """
+    out = output_dir / f"sub-{subject}_clean_raw.fif"
+    raw.save(out, overwrite=True)
+    print(f"  Saved sigclean   → {out.name}")
+    return out
+
+
+def save_psd_plot(
+    raw: mne.io.BaseRaw,
+    output_path: Path,
+    fmax: float = 80,
+) -> None:
+    """Save a PSD plot as a QC figure (non-interactive)."""
+    fig = raw.compute_psd(fmax=fmax).plot(show=False)
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  PSD plot         → {output_path.name}")
 
 
 def prepare_eeg_channels(raw):
@@ -66,12 +126,12 @@ def interpolate_bad_channels(raw: mne.io.BaseRaw, plot=True):
         print("No bad channels detected.")
     return raw
 
-def rereference_raw(raw: mne.io.BaseRaw, ref_type="average", plot=True):
+def rereference_raw(raw: mne.io.BaseRaw, ref_type: str = "average", plot: bool = True) -> mne.io.BaseRaw:
     """
-    Set EEG reference and plot.
+    Apply EEG reference directly to data (projection=False) and optionally plot.
     """
-    raw.set_eeg_reference(ref_type)
-    print(f"Applied {ref_type} reference.")
+    raw.set_eeg_reference(ref_type, projection=False)
+    print(f"  Re-reference     : {ref_type}")
     if plot:
         raw.plot(scalings=dict(eeg=100e-6), title=f"EEG after {ref_type} reference")
     return raw
@@ -123,23 +183,36 @@ def create_preica_epochs(raw, epoch_length):
     )
     return epochs
 
-def run_autoreject(epochs: mne.Epochs, n_interpolate=[1, 2, 3, 4], random_state=11, plot = True):
+def run_autoreject(
+    epochs: mne.Epochs,
+    n_interpolate: list[int] = [1, 2, 3, 4],
+    random_state: int = 11,
+    plot: bool = False,
+) -> tuple[mne.Epochs, object]:
     """
-    Fit AutoReject and return clean epochs and reject log
-    """
+    Fit AutoReject on epochs and return (clean_epochs, reject_log).
 
+    Parameters
+    ----------
+    plot : if True, display rejected epochs interactively (disable for batch runs)
+    """
     ar = AutoReject(
         n_interpolate=n_interpolate,
         random_state=random_state,
         n_jobs=1,
-        verbose=True
+        verbose=False,
     )
     ar.fit(epochs)
     epochs_ar, reject_log = ar.transform(epochs, return_log=True)
-    print("Bad epochs detected:", reject_log.bad_epochs.sum())
-    
+
+    n_bad = int(reject_log.bad_epochs.sum())
+    pct   = 100 * n_bad / len(epochs)
+    print(f"  AutoReject       : {n_bad}/{len(epochs)} epochs rejected ({pct:.0f}%)")
+
+    if pct > 30:
+        print("  WARNING: >30% epochs rejected — inspect signal quality")
+
     if plot and reject_log.bad_epochs.any():
-        print("Plotting rejected epochs...")
         epochs[reject_log.bad_epochs].plot(scalings=dict(eeg=100e-6), title="Rejected Epochs")
 
     return epochs_ar, reject_log

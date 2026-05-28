@@ -30,7 +30,7 @@ DATASETS = {
             "sigclean":   "d02_sigclean",
             "preica":     "d03_preica",
             "ica":        "d04_ica",
-            "gait":       "d05_gaitcycles",
+            "gait_cycles":       "d05_gaitcycles",
             "tfr":        "d06_tfr",
             "ersp":       "d07_ersp",
         },
@@ -47,15 +47,14 @@ DATASETS = {
 
         "dirs": {
             "raw":        "d00_raw",
-            "montage":    "d00_montage",
-            "gaitevents": "d00_gaitevents",
-            "seg":        "d01_segmented",
-            "sigclean":   "d02_sigclean",
-            "preica":     "d03_preica",
-            "ica":        "d04_ica",
-            "gait":       "d05_gaitcycles",
-            "tfr":        "d06_tfr",
-            "ersp":       "d07_ersp",
+            "gait_events":"d00_gaitevents",
+
+            "prep":    "d01_prep",
+
+            "clean":      "d02_clean",
+            "gait_cycles":       "d03_gaitcycles",
+            "tfr":        "d04_tfr",
+            "ersp":       "d05_ersp",
         },
 
         "event_file": "events/{sub}.tsv",

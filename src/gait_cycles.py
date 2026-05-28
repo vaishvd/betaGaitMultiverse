@@ -2,98 +2,213 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-def load_events(path) -> pd.DataFrame:
-    return pd.read_csv(path, sep="\t")
+from scipy.signal import butter, filtfilt, find_peaks
 
 
-def filter_condition(events: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
-    """Trim events to the window [start_marker, end_marker]."""
-    t0 = events.loc[events["value"] == start, "onset"].iat[0]
-    t1 = events.loc[events["value"] == end,   "onset"].iat[0]
-    return events[(events["onset"] >= t0) & (events["onset"] <= t1)].reset_index(drop=True)
+# =========================================================
+# FILTERING
+# =========================================================
+def lowpass(signal, fs, cutoff=6.0):
+
+    b, a = butter(4, cutoff / (fs / 2), btype="low")
+
+    return filtfilt(b, a, signal)
 
 
-def rhs_cycles(events: pd.DataFrame) -> list[tuple[float, float]]:
-    """Return (start_s, end_s) pairs from consecutive RHS events — one pair = one stride."""
-    onsets = events.loc[events["value"] == "RHS", "onset"].to_numpy(dtype=float)
-    if len(onsets) < 2:
-        raise ValueError(f"Need ≥2 RHS events; found {len(onsets)}.")
-    return list(zip(onsets[:-1], onsets[1:]))
+# =========================================================
+# RELATIVE HEEL SIGNAL
+# =========================================================
+def heel_relative_signal(heel, pelvis):
+
+    return heel - pelvis
 
 
-def compute_durations(cycles: list[tuple[float, float]]) -> np.ndarray:
-    """Return stride durations in seconds."""
-    return np.array([end - start for start, end in cycles])
+# =========================================================
+# EVENT DETECTION
+# =========================================================
+def detect_gait_events(signal, fs, cutoff=6.0):
+
+    sig = lowpass(signal, fs, cutoff)
+
+    vel = np.gradient(sig)
+
+    min_dist = int(0.4 * fs)
+
+    # Heel strike → velocity turns negative
+    hs, _ = find_peaks(sig, distance=min_dist)
+
+    # Toe-off → velocity turns positive
+    to, _ = find_peaks(-sig, distance=min_dist)
+
+    return hs, to, sig
 
 
-# Cycle extraction & rejection
+# =========================================================
+# QC REPORT
+# =========================================================
+def event_quality_report(lhs, lto, rhs, rto):
 
-def extract_cycles(
-    raw, cycles: list[tuple[float, float]],
-    sfreq: float, min_dur: float, max_dur: float,
-    k: float = 3.0,
-) -> tuple[list | None, np.ndarray | None]:
-    """
-    Two-pass pipeline:
-      Pass 1 — collect valid segments, compute per-cycle median P2P.
-      Pass 2 — reject cycles above median + k*MAD.
- 
-    Returns:
-        segments  : list of (channels, samples) arrays at true sfreq
-        durations : (n_cycles,) stride durations in seconds
-    """
-    segments, durations, p2p = [], [], []
- 
-    for start, end in cycles:
-        dur = end - start
-        if not (min_dur <= dur <= max_dur):
-            continue
- 
-    p2p_arr   = np.array(p2p)
-    med       = np.median(p2p_arr)
-    threshold = med + k * np.median(np.abs(p2p_arr - med))
- 
-    clean, clean_dur = zip(
-        *[(data, dur) for data, dur, amp in zip(segments, durations, p2p) if amp <= threshold]
-    ) if any(amp <= threshold for amp in p2p) else (None, None)
- 
-    if clean is None:
-        return None, None
- 
-    return list(clean), np.array(clean_dur)
-
-# Gait event structure in cycle space
-
-def compute_event_means(
-    events: pd.DataFrame, cycles: list[tuple[float, float]]
-) -> dict[str, float | None]:
-    """
-    Return mean position of each gait event (RHS, LTO, LHS, RTO)
-    as a percentage of the gait cycle, averaged across all cycles.
-    """
-    event_map: dict[str, list[float]] = {"RHS": [], "LTO": [], "LHS": [], "RTO": []}
- 
-    for start, end in cycles:
-        cycle_events = events[(events["onset"] > start) & (events["onset"] < end)]
-        for _, row in cycle_events.iterrows():
-            ev = row["value"]
-            if ev in event_map:
-                event_map[ev].append((row["onset"] - start) / (end - start) * 100)
- 
-    return {ev: float(np.mean(vals)) if vals else None for ev, vals in event_map.items()}
+    return {
+        "LHS": len(lhs),
+        "LTO": len(lto),
+        "RHS": len(rhs),
+        "RTO": len(rto),
+    }
 
 
-# Plotting
+# =========================================================
+# RHS → RHS GAIT CYCLES
+# =========================================================
+def extract_rhs_cycles(
+    rhs,
+    fs,
+    min_dur=0.5,
+    max_dur=2.5,
+):
 
-def plot_duration_distribution(durations: np.ndarray, out_file):
-    """Histogram of gait cycle durations."""
-    plt.figure(figsize=(5, 3))
+    cycles = []
 
-    plt.hist(durations, bins=30)
-    plt.xlabel("Gait cycle duration (s)")
-    plt.ylabel("Count")
-    plt.title("Gait cycle duration distribution")
+    for i in range(len(rhs) - 1):
+
+        start = rhs[i]
+        end   = rhs[i + 1]
+
+        dur = (end - start) / fs
+
+        if min_dur <= dur <= max_dur:
+
+            cycles.append({
+                "cycle_id": i,
+                "rhs_start_sample": start,
+                "rhs_end_sample": end,
+                "rhs_start_s": start / fs,
+                "rhs_end_s": end / fs,
+                "duration_s": dur,
+            })
+
+    return pd.DataFrame(cycles)
+
+
+# =========================================================
+# SAVE EVENTS
+# =========================================================
+def build_events_dataframe(lhs, lto, rhs, rto, fs):
+
+    rows = (
+        [(s / fs, s, "LHS") for s in lhs] +
+        [(s / fs, s, "LTO") for s in lto] +
+        [(s / fs, s, "RHS") for s in rhs] +
+        [(s / fs, s, "RTO") for s in rto]
+    )
+
+    return (
+        pd.DataFrame(rows, columns=["onset_s", "sample", "event"])
+        .sort_values("sample")
+        .reset_index(drop=True)
+    )
+
+
+# =========================================================
+# QC PLOT
+# =========================================================
+def plot_gait_qc(
+    L_signal,
+    R_signal,
+    lhs,
+    lto,
+    rhs,
+    rto,
+    cycles_df,
+    fs,
+    out_file,
+):
+
+    t = np.arange(len(L_signal)) / fs
+
+    fig, ax = plt.subplots(
+        2,
+        1,
+        figsize=(15, 8),
+        sharex=True,
+    )
+
+    # -----------------------------------------------------
+    # LEFT
+    # -----------------------------------------------------
+    ax[0].plot(
+        t,
+        L_signal,
+        color="forestgreen",
+        lw=1,
+    )
+
+    ax[0].scatter(
+        lhs / fs,
+        L_signal[lhs],
+        color="magenta",
+        label="LHS",
+        s=30,
+        zorder=5,
+    )
+
+    ax[0].scatter(
+        lto / fs,
+        L_signal[lto],
+        color="blue",
+        label="LTO",
+        s=30,
+        zorder=5,
+    )
+
+    ax[0].set_title("Left heel trajectory")
+    ax[0].legend()
+
+
+    # -----------------------------------------------------
+    # RIGHT
+    # -----------------------------------------------------
+    ax[1].plot(
+        t,
+        R_signal,
+        color="firebrick",
+        lw=1,
+    )
+
+    ax[1].scatter(
+        rhs / fs,
+        R_signal[rhs],
+        color="black",
+        label="RHS",
+        s=30,
+        zorder=5,
+    )
+
+    ax[1].scatter(
+        rto / fs,
+        R_signal[rto],
+        color="orange",
+        label="RTO",
+        s=30,
+        zorder=5,
+    )
+
+    # Shade gait cycles
+    for _, row in cycles_df.iterrows():
+
+        ax[1].axvspan(
+            row["rhs_start_s"],
+            row["rhs_end_s"],
+            color="limegreen",
+            alpha=0.15,
+        )
+
+    ax[1].set_title("Right heel trajectory + RHS→RHS cycles")
+    ax[1].legend()
+
+    ax[1].set_xlabel("Time (s)")
 
     plt.tight_layout()
-    plt.savefig(out_file, dpi=150)
+
+    plt.savefig(out_file, dpi=200)
+
     plt.close()
