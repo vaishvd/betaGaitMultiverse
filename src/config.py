@@ -47,19 +47,16 @@ DATASETS = {
 
         "dirs": {
             "raw":        "d00_raw",
-            "gait_events":"d00_gaitevents",
+            "gait_events":"d01_gaitevents",
 
-            "prep":    "d01_prep",
+            "prep":    "d02_prep",
 
-            "clean":      "d02_clean",
-            "gait_cycles":       "d03_gaitcycles",
+            "clean":      "d03_clean",
             "tfr":        "d04_tfr",
             "ersp":       "d05_ersp",
         },
 
-        "event_file": "events/{sub}.tsv",
-        "condition_start": "Walk",
-        "condition_end": "Stop",
+        "event_file": "events/{sub}.tsv"
     },
 
 }
