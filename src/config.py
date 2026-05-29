@@ -52,7 +52,7 @@ DATASETS = {
             "prep":    "d02_prep",
 
             "clean":      "d03_clean",
-            "tfr":        "d04_tfr",
+            "gaitepochs":        "d04_gaitepochs",
             "ersp":       "d05_ersp",
         },
 
