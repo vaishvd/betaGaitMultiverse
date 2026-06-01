@@ -47,7 +47,7 @@ for subject in SUBJECTS:
     print(f"ICA FIT: sub-{subject}")
     print(f"{'='*60}")
 
-    # ── Load raw EEG ───────────────────────────────────────────────────────
+    # Load raw EEG 
 
     vhdr_file = (
         RAW_DIR / f"sub-{subject}" / "eeg"
@@ -58,24 +58,24 @@ for subject in SUBJECTS:
     raw.pick_types(eeg=True)
     print(f"  Loaded: {len(raw.ch_names)} channels | {raw.info['sfreq']:.0f} Hz")
 
-    # ── Montage ────────────────────────────────────────────────────────────
+    # Montage 
 
     montage = mne.channels.make_standard_montage("standard_1020")
     raw.set_montage(montage, on_missing="ignore")
 
-    # ── Resample ───────────────────────────────────────────────────────────
+    # Resample 
 
     if raw.info["sfreq"] > TARGET_SFREQ:
         raw.resample(TARGET_SFREQ)
         print(f"  Resampled → {TARGET_SFREQ} Hz")
 
-    # ── Filter ─────────────────────────────────────────────────────────────
+    #  Filter
 
     raw.filter(l_freq=L_FREQ, h_freq=None, fir_design="firwin")
     raw.notch_filter(freqs=LINE_FREQ)
     print(f"  Filtered: high-pass {L_FREQ} Hz, notch {LINE_FREQ} Hz")
 
-    # ── Bad channel detection ──────────────────────────────────────────────
+    # Bad channel detection 
 
     data = raw.get_data()
     var  = np.var(data, axis=1)
@@ -84,12 +84,12 @@ for subject in SUBJECTS:
     raw.info["bads"] = bads
     print(f"  Bad channels: {bads if bads else 'none'}")
 
-    # ── Average reference — applied directly to data (not as projection) ──
+    # Average reference
 
     raw.set_eeg_reference("average", projection=False)
     print("  Re-referenced: average (applied to data)")
 
-    # ── QC: PSD ────────────────────────────────────────────────────────────
+    # QC: PSD 
 
     fig = raw.compute_psd(fmax=80, reject_by_annotation=False).plot(show=False)
     fig.savefig(PREP_DIR / f"sub-{subject}_psd.png")
@@ -97,7 +97,7 @@ for subject in SUBJECTS:
     plt.close(fig)
     print("  PSD saved")
 
-    # ── Save preprocessed continuous raw ──────────────────────────────────
+    # Save preprocessed continuous raw 
 
     clean_raw_out = PREP_DIR / f"sub-{subject}_clean_raw.fif"
     raw.save(clean_raw_out, overwrite=True)
@@ -109,7 +109,7 @@ for subject in SUBJECTS:
         print("  ERROR: NaN in saved raw — check preprocessing steps above.")
         continue
 
-    # ── Epochs for ICA fitting ─────────────────────────────────────────────
+    # Epochs for ICA fitting
 
     events = mne.make_fixed_length_events(raw, duration=EPOCH_DUR)
     epochs = mne.Epochs(
@@ -125,7 +125,7 @@ for subject in SUBJECTS:
     epochs = drop_invalid_eeg_channels(epochs)
     print(f"  Epochs: {len(epochs)} × {len(epochs.ch_names)} ch")
 
-    # ── AutoReject ─────────────────────────────────────────────────────────
+    #  AutoReject
 
     ar = AutoReject(n_interpolate=[1, 2, 4], random_state=RANDOM_STATE, n_jobs=1)
     ar.fit(epochs)
@@ -144,7 +144,7 @@ for subject in SUBJECTS:
 
     save_epochs(epochs_clean, PREP_DIR, subject)
 
-    # ── Fit ICA (no component exclusion — that is done in ana03) ──────────
+    # Fit ICA 
 
     ica = run_ica(epochs_clean, n_components=N_COMPONENTS, random_state=RANDOM_STATE)
 
