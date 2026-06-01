@@ -1,5 +1,6 @@
 .venv/
 datasets/
+old scripts/
 __pycache__/
 *.fdt
 *.set
