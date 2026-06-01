@@ -1,152 +1,157 @@
+"""
+ana02_raw2ica.py
+================
+Preprocess continuous EEG and fit ICA decomposition.
+IC rejection is handled separately in ana03_ica2clean.py.
+
+Input
+-----
+d00_raw/  sub-{sub}/eeg/sub-{sub}_task-{TASK}.vhdr
+
+Output
+------
+d02_prep/
+    sub-{sub}_clean_raw.fif          preprocessed continuous raw
+    sub-{sub}_preica_clean_epo.fif   AutoReject-cleaned epochs for ICA fit
+    sub-{sub}_ica.fif                fitted ICA (no components excluded)
+    sub-{sub}_ica_topos_*.png        component topography plots
+    sub-{sub}_psd.png                PSD quality check
+"""
+
 import mne
 import numpy as np
 from autoreject import AutoReject
 from src.paths import get_dataset_dirs
-from pathlib import Path
-from src.preprocessing import save_epochs
-from src.ica_utils import (
-    run_ica,
-    label_and_mark_ica,
-    save_ica_component_plots,
-)
+from src.preprocessing import save_epochs, drop_invalid_eeg_channels
+from src.ica_utils import run_ica, save_ica_component_plots
 
 DATASET  = "stepup"
 SUBJECTS = ["S1"]
-TASK = "CS"
-DATATYPE = "eeg"
+TASK     = "CS"
 
-# Filtering
-TARGET_SFREQ = 512
-L_FREQ       = 1.0
-LINE_FREQ   = 50
-
-# Bad channels
+TARGET_SFREQ       = 512
+L_FREQ             = 1.0
+LINE_FREQ          = 50
 BAD_CHAN_THRESHOLD = 3.0
+EPOCH_DUR          = 2.0
+N_COMPONENTS       = 0.99
+RANDOM_STATE       = 42
 
-# Epoching
-EPOCH_DUR = 2.0
-
-# ICA
-N_COMPONENTS = 0.99
-RANDOM_STATE = 42
-
-# ICLabel
-BRAIN_THRESH = 0.7
-
-dirs = get_dataset_dirs(DATASET)
-
+dirs     = get_dataset_dirs(DATASET)
 RAW_DIR  = dirs["raw"]
 PREP_DIR = dirs["prep"]
 
 for subject in SUBJECTS:
 
     print(f"\n{'='*60}")
-    print(f"sub-{subject}")
+    print(f"ICA FIT: sub-{subject}")
     print(f"{'='*60}")
 
-    # Load raw EEG
+    # ── Load raw EEG ───────────────────────────────────────────────────────
+
     vhdr_file = (
-        RAW_DIR
-        / f"sub-{subject}"
-        / "eeg"
+        RAW_DIR / f"sub-{subject}" / "eeg"
         / f"sub-{subject}_task-{TASK}.vhdr"
     )
 
-    raw = mne.io.read_raw_brainvision(vhdr_file, preload=True)
-
+    raw = mne.io.read_raw_brainvision(vhdr_file, preload=True, verbose=False)
     raw.pick_types(eeg=True)
+    print(f"  Loaded: {len(raw.ch_names)} channels | {raw.info['sfreq']:.0f} Hz")
 
-    print(f"Loaded: {len(raw.ch_names)} channels | {raw.info['sfreq']} Hz")
+    # ── Montage ────────────────────────────────────────────────────────────
 
-    # Montage
     montage = mne.channels.make_standard_montage("standard_1020")
     raw.set_montage(montage, on_missing="ignore")
-    print(f"  Channels: {len(raw.ch_names)} | sfreq: {raw.info['sfreq']:.0f} Hz")
-    # Visualize the montage
-    fig = montage.plot(kind='topomap', show_names=True)
 
-    # Downsample
+    # ── Resample ───────────────────────────────────────────────────────────
+
     if raw.info["sfreq"] > TARGET_SFREQ:
         raw.resample(TARGET_SFREQ)
-        print(f"Downsampled → {TARGET_SFREQ} Hz")
+        print(f"  Resampled → {TARGET_SFREQ} Hz")
 
-    # High-pass filter
+    # ── Filter ─────────────────────────────────────────────────────────────
+
     raw.filter(l_freq=L_FREQ, h_freq=None, fir_design="firwin")
-    print(f"  High-pass filtered at {L_FREQ} Hz")
-
-    # Notch filter
     raw.notch_filter(freqs=LINE_FREQ)
-    print(f"  Notch filtered at {LINE_FREQ} Hz")
+    print(f"  Filtered: high-pass {L_FREQ} Hz, notch {LINE_FREQ} Hz")
 
-    # Bad channel detection
+    # ── Bad channel detection ──────────────────────────────────────────────
+
     data = raw.get_data()
-    var = np.var(data, axis=1)
-    z = (var - var.mean()) / var.std()
-
-    bads = [raw.ch_names[i] for i in np.where(np.abs(z) > 3.0)[0]]
+    var  = np.var(data, axis=1)
+    z    = (var - var.mean()) / var.std()
+    bads = [raw.ch_names[i] for i in np.where(np.abs(z) > BAD_CHAN_THRESHOLD)[0]]
     raw.info["bads"] = bads
+    print(f"  Bad channels: {bads if bads else 'none'}")
 
-    print(f"Bads detected: {bads}")
-    # Average re-reference 
-    raw.set_eeg_reference("average")
-    print("  Re-referenced to average")
+    # ── Average reference — applied directly to data (not as projection) ──
 
-    psd = raw.compute_psd(fmax=80, reject_by_annotation=False)
-    fig = psd.plot(show=False)
+    raw.set_eeg_reference("average", projection=False)
+    print("  Re-referenced: average (applied to data)")
+
+    # ── QC: PSD ────────────────────────────────────────────────────────────
+
+    fig = raw.compute_psd(fmax=80, reject_by_annotation=False).plot(show=False)
     fig.savefig(PREP_DIR / f"sub-{subject}_psd.png")
-    print("PSD saved")
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+    print("  PSD saved")
 
-# Epoching for AutoReject
+    # ── Save preprocessed continuous raw ──────────────────────────────────
+
+    clean_raw_out = PREP_DIR / f"sub-{subject}_clean_raw.fif"
+    raw.save(clean_raw_out, overwrite=True)
+
+    nan_frac = np.mean(np.isnan(raw.get_data()))
+    print(f"  Saved clean_raw.fif  (NaN: {nan_frac*100:.1f}%)")
+
+    if nan_frac > 0:
+        print("  ERROR: NaN in saved raw — check preprocessing steps above.")
+        continue
+
+    # ── Epochs for ICA fitting ─────────────────────────────────────────────
 
     events = mne.make_fixed_length_events(raw, duration=EPOCH_DUR)
-
     epochs = mne.Epochs(
-        raw,
-        events,
-        tmin=0,
-        tmax=EPOCH_DUR,
-        baseline=None,
-        preload=True,
+        raw, events,
+        tmin=0, tmax=EPOCH_DUR,
+        baseline=None, preload=True,
         reject_by_annotation=False,
+        verbose=False,
     )
 
-    print(f"Epochs created: {len(epochs)}")
+    epochs.set_montage("standard_1020", on_missing="ignore")
+    epochs = epochs.pick_types(eeg=True, eog=False, misc=False)
+    epochs = drop_invalid_eeg_channels(epochs)
+    print(f"  Epochs: {len(epochs)} × {len(epochs.ch_names)} ch")
 
-    ar = AutoReject(
-        n_interpolate=[1, 2, 4],
-        random_state=RANDOM_STATE,
-        n_jobs=1,
-    )
+    # ── AutoReject ─────────────────────────────────────────────────────────
 
-    epochs_clean = ar.fit_transform(epochs)
+    ar = AutoReject(n_interpolate=[1, 2, 4], random_state=RANDOM_STATE, n_jobs=1)
+    ar.fit(epochs)
+    epochs_clean, reject_log = ar.transform(epochs, return_log=True)
 
-    print(f"AutoReject done: {len(epochs_clean)} kept")
+    n_bad = int(reject_log.bad_epochs.sum())
+    reject_pct = 100 * n_bad / len(epochs)
+    print(f"  AutoReject: {n_bad}/{len(epochs)} epochs rejected ({reject_pct:.1f}%)")
+
+    if reject_pct > 30:
+        print("  WARNING: >30% epochs rejected — check recording quality")
+    if len(epochs_clean) < 20:
+        raise RuntimeError(
+            f"Too few clean epochs ({len(epochs_clean)}) — stopping pipeline."
+        )
 
     save_epochs(epochs_clean, PREP_DIR, subject)
 
-# ICA
-    ica = run_ica(
-        epochs_clean,
-        n_components=N_COMPONENTS,
-        random_state=RANDOM_STATE,
-    )
+    # ── Fit ICA (no component exclusion — that is done in ana03) ──────────
 
-    label_and_mark_ica(
-        ica,
-        epochs_clean,
-        brain_thresh=BRAIN_THRESH,
-    )
+    ica = run_ica(epochs_clean, n_components=N_COMPONENTS, random_state=RANDOM_STATE)
 
     ica_out = PREP_DIR / f"sub-{subject}_ica.fif"
     ica.save(ica_out, overwrite=True)
+    print(f"  ICA saved: {ica.n_components_} components, none excluded")
 
-    print("ICA saved")
+    save_ica_component_plots(ica, PREP_DIR, subject)
 
-    # ICA QC plots
-    save_ica_component_plots(
-        ica,
-        PREP_DIR,
-        subject,
-    )
-
-print("\nDone.")
+print("\nICA FIT COMPLETE")

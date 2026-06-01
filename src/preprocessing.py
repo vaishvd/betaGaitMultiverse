@@ -174,6 +174,29 @@ def create_fixed_length_epochs(raw: mne.io.BaseRaw, duration: float):
     print(f"Created {len(epochs)} epochs of {duration} s each.")
     return epochs
 
+def drop_invalid_eeg_channels(epochs):
+    """
+    Drops EEG channels that have invalid or missing sensor locations.
+    Works across datasets (no hardcoded channel names).
+    """
+
+    bad_channels = []
+
+    for ch in epochs.info["chs"]:
+        if ch["kind"] == 2:  # EEG
+            loc = ch["loc"][:3]
+
+            if (
+                np.any(np.isnan(loc)) or
+                np.allclose(loc, 0)
+            ):
+                bad_channels.append(ch["ch_name"])
+
+    print(f"\nDropping {len(bad_channels)} invalid EEG channels:")
+    print(bad_channels)
+
+    return epochs.drop_channels(bad_channels)
+
 def create_preica_epochs(raw, epoch_length):
     import mne
     epochs = mne.make_fixed_length_epochs(
