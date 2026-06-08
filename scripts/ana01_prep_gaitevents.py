@@ -11,7 +11,7 @@ from src.gait_cycles import (
 )
 
 DATASET = "stepup"
-SUBJECTS = ["S1", "S2", "S3", "S4"]
+SUBJECTS = ["S1"]
 
 FS = 100
 
