@@ -8,37 +8,7 @@ import matplotlib.pyplot as plt
 import mne
 from autoreject import AutoReject
 from pathlib import Path
-
-
-def filter_raw(
-    raw: mne.io.BaseRaw,
-    target_sfreq: float = 512,
-    l_freq: float = 1.0,
-    line_freqs: list[float] | None = None,
-) -> mne.io.BaseRaw:
-    """
-    Resample, high-pass filter, and notch filter, all in-place.
-
-    Parameters
-    ----------
-    target_sfreq : resample target in Hz (skipped if already at target)
-    l_freq       : high-pass cutoff in Hz
-    line_freqs   : list of notch frequencies in Hz  (default: [50] for EU)
-    """
-    if line_freqs is None:
-        line_freqs = [50]
-
-    if raw.info["sfreq"] != target_sfreq:
-        raw.resample(target_sfreq)
-        print(f"  Resampled        → {target_sfreq} Hz")
-
-    raw.filter(l_freq=l_freq, h_freq=None, method="fir", fir_window="hamming")
-    print(f"  High-pass filter @ {l_freq} Hz")
-
-    raw.notch_filter(freqs=line_freqs)
-    print(f"  Notch filter     @ {line_freqs} Hz")
-
-    return raw
+from src.paths import get_dataset_dirs
 
 
 def save_sigclean_raw(
@@ -67,20 +37,29 @@ def save_psd_plot(
     plt.close(fig)
     print(f"  PSD plot         → {output_path.name}")
 
-
-def prepare_eeg_channels(raw):
+def drop_invalid_channels(raw):
     """
-    Select EEG channels and apply BioSemi128 montage.
+    Removes known non-EEG / invalid channels that break MNE interpolation
     """
 
-    raw.pick("eeg")
-    raw.load_data()
+    invalid_labels = [
+        "status",
+        "counter",
+        "counter 2power24",
+        "source"
+    ]
 
-    rename = {ch: ch.replace("1-", "", 1) for ch in raw.ch_names}
-    raw.rename_channels(rename)
+    # Find matching channels
+    to_drop = [
+        ch for ch in raw.ch_names
+        if any(bad in ch.lower() for bad in invalid_labels)
+    ]
 
-    montage = mne.channels.make_standard_montage("biosemi128")
-    raw.set_montage(montage, on_missing="warn")
+    if len(to_drop) > 0:
+        print(f"Dropping invalid channels: {to_drop}")
+        raw.drop_channels(to_drop)
+    else:
+        print("No invalid channels found.")
 
     return raw
 
@@ -101,14 +80,6 @@ def detect_bad_channels(raw, threshold=3.0):
 
     return raw, bad_chs
 
-def load_clean_raw(subject: str, input_dir: Path):
-    """
-    Load preprocessed raw FIF file for a subject
-    """
-
-    raw_file = input_dir / f"sub-{subject}_clean_raw.fif"
-    raw = mne.io.read_raw_fif(raw_file, preload=True)
-    return raw
 
 def interpolate_bad_channels(raw: mne.io.BaseRaw, plot=True):
     """
@@ -126,15 +97,6 @@ def interpolate_bad_channels(raw: mne.io.BaseRaw, plot=True):
         print("No bad channels detected.")
     return raw
 
-def rereference_raw(raw: mne.io.BaseRaw, ref_type: str = "average", plot: bool = True) -> mne.io.BaseRaw:
-    """
-    Apply EEG reference directly to data (projection=False) and optionally plot.
-    """
-    raw.set_eeg_reference(ref_type, projection=False)
-    print(f"  Re-reference     : {ref_type}")
-    if plot:
-        raw.plot(scalings=dict(eeg=100e-6), title=f"EEG after {ref_type} reference")
-    return raw
 
 def apply_asr(
     raw: mne.io.BaseRaw,
@@ -188,14 +150,14 @@ def drop_invalid_eeg_channels(epochs):
 
             if (
                 np.any(np.isnan(loc)) or
-                np.allclose(loc, 0)
+                np.all(loc == 0.0)
             ):
                 bad_channels.append(ch["ch_name"])
 
-    print(f"\nDropping {len(bad_channels)} invalid EEG channels:")
-    print(bad_channels)
-
-    return epochs.drop_channels(bad_channels)
+    if bad_channels:
+        print(f"  Dropping {len(bad_channels)} invalid EEG channels: {bad_channels}")
+        return epochs.drop_channels(bad_channels)
+    return epochs
 
 def create_preica_epochs(raw, epoch_length):
     import mne
