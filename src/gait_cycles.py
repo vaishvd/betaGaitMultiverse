@@ -1,50 +1,175 @@
+"""
+gait_cycles.py
+==============
+All signal processing, event detection, cycle extraction, QC, and
+motion-file I/O for the gait pipeline.
+
+----------
+load_motion(motion_file, marker_cols) 
+heel_relative_signal(heel, pelvis)
+detect_gait_events(signal, fs, ...)
+build_events_dataframe(lhs, lto, rhs, rto, fs)
+extract_valid_gait_cycles(lhs, lto, rhs, rto, fs, ...)
+event_quality_report(events_df, cycles_df)
+plot_gait_qc(...)
+plot_gait_segment(...)
+"""
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from pathlib import Path
 from scipy.signal import butter, filtfilt, find_peaks
 
+ 
 
-# Filtering
+# Tracked-point labels used to identify each logical marker.
+# These match the 'tracked_point' column in the BIDS channels.tsv.
+
+TRACKED_POINT_MAP = {
+    "LHEE": "left_heel",
+    "RHEE": "right_heel",
+    "PELV": "pelvis",
+}
+ 
+# Axis suffix to select (PosY = anterior-posterior, the relevant axis for
+# heel-strike / toe-off detection in the sagittal plane).
+AXIS_SUFFIX = "PosY"
+ 
+
+def resolve_marker_cols(channels_file):
+    """
+    Derive the three required marker column names from a BIDS channels.tsv.
+ 
+    Matches rows by ``tracked_point`` (values in TRACKED_POINT_MAP) and
+    selects the channel whose ``name`` ends with AXIS_SUFFIX (``PosY``).
+ 
+    Parameters
+    ----------
+    channels_file : str | Path
+ 
+    Returns
+    -------
+    marker_cols : dict
+        {"LHEE": "<col>", "RHEE": "<col>", "PELV": "<col>"}
+ 
+    Raises
+    ------
+    FileNotFoundError, ValueError
+    """
+    channels_file = Path(channels_file)
+    if not channels_file.exists():
+        raise FileNotFoundError(f"channels.tsv not found: {channels_file}")
+ 
+    ch_df = pd.read_csv(channels_file, sep="\t")
+ 
+    required_cols = {"name", "tracked_point"}
+    missing_cols  = required_cols - set(ch_df.columns)
+    if missing_cols:
+        raise ValueError(
+            f"channels.tsv is missing required columns: {sorted(missing_cols)}\n"
+            f"  Found: {list(ch_df.columns)}"
+        )
+ 
+    marker_cols = {}
+    for logical, tracked_point in TRACKED_POINT_MAP.items():
+        candidates = ch_df[
+            (ch_df["tracked_point"] == tracked_point) &
+            (ch_df["name"].str.endswith(AXIS_SUFFIX))
+        ]["name"].tolist()
+ 
+        if len(candidates) == 0:
+            raise ValueError(
+                f"No '{AXIS_SUFFIX}' channel found for tracked_point='{tracked_point}' "
+                f"in {channels_file.name}.\n"
+                f"  Available tracked_points: {ch_df['tracked_point'].unique().tolist()}"
+            )
+        if len(candidates) > 1:
+            raise ValueError(
+                f"Multiple '{AXIS_SUFFIX}' channels found for tracked_point="
+                f"'{tracked_point}': {candidates}.\n"
+                f"  Refine AXIS_SUFFIX or channels.tsv to disambiguate."
+            )
+ 
+        marker_cols[logical] = candidates[0]
+ 
+    print(f"  Marker columns resolved from {channels_file.name}:")
+    for k, v in marker_cols.items():
+        print(f"    {k} → {v}")
+ 
+    return marker_cols
+
+
+def load_motion(motion_file):
+    """
+    Load a motion-capture TSV file with or without column headers, and
+    return both the DataFrame and the resolved marker column mapping.
+ 
+    Column names are always resolved from the companion channels.tsv
+    (``{motion_stem}_channels.tsv``), so no column names are hardcoded.
+ 
+    Parameters
+    ----------
+    motion_file : str | Path
+ 
+    Returns
+    -------
+    df : pd.DataFrame
+    marker_cols : dict  {"LHEE": col, "RHEE": col, "PELV": col}
+ 
+    Raises
+    ------
+    FileNotFoundError, ValueError
+    """
+    motion_file   = Path(motion_file)
+    channels_file = motion_file.with_name(motion_file.stem + "_channels.tsv")
+ 
+    marker_cols = resolve_marker_cols(channels_file)
+    col_names   = pd.read_csv(channels_file, sep="\t")["name"].tolist()
+ 
+    df = pd.read_csv(motion_file, sep="\t")
+ 
+    if not set(col_names).issubset(df.columns):
+        print(f"  No headers detected — assigning column names "
+              f"from {channels_file.name}")
+        df = pd.read_csv(motion_file, sep="\t", header=None, names=col_names)
+ 
+    return df, marker_cols
+
+
+
+# Signal processing
 
 def lowpass(signal, fs, cutoff=6.0):
-
-    b, a = butter(
-        4,
-        cutoff / (fs / 2),
-        btype="low",
-    )
-
+    b, a = butter(4, cutoff / (fs / 2), btype="low")
     return filtfilt(b, a, signal)
 
 
-#Relative heel signal
-
 def heel_relative_signal(heel, pelvis):
-
     sig = heel - pelvis
     sig = sig - np.mean(sig)
-
     return sig
 
 
 # Gait event detection
 
-def detect_gait_events(
-    signal,
-    fs,
-    cutoff=6.0,
-    min_step_time=0.5,
-):
+def detect_gait_events(signal, fs, cutoff=6.0, min_step_time=0.5):
+    """
+    Detect heel-strike and toe-off events from a relative heel signal.
+
+    Returns
+    -------
+    hs    : ndarray  — heel-strike sample indices
+    to    : ndarray  — toe-off sample indices
+    sig   : ndarray  — low-pass filtered signal
+    """
     sig = lowpass(signal, fs, cutoff)
 
     min_dist   = int(min_step_time * fs)
-    prominence = np.std(sig) * 1.0   # conservative: avoids small spurious peaks
+    prominence = np.std(sig) * 1.0
 
-    # Heel strike = positive peak
-    hs, _ = find_peaks(sig, distance=min_dist, prominence=prominence)
-
-    # Toe off = negative peak (trough)
+    hs, _ = find_peaks( sig, distance=min_dist, prominence=prominence)
     to, _ = find_peaks(-sig, distance=min_dist, prominence=prominence)
 
     return hs, to, sig
@@ -53,49 +178,29 @@ def detect_gait_events(
 # Build events dataframe
 
 def build_events_dataframe(lhs, lto, rhs, rto, fs):
-
     rows = (
         [(s / fs, s, "LHS") for s in lhs] +
         [(s / fs, s, "LTO") for s in lto] +
         [(s / fs, s, "RHS") for s in rhs] +
         [(s / fs, s, "RTO") for s in rto]
     )
-
     df = (
         pd.DataFrame(rows, columns=["onset_s", "sample", "event"])
         .sort_values("sample")
         .reset_index(drop=True)
     )
-
     return df
 
-
-# =========================================================
-# LEVEL-WALKING CYCLE EXTRACTION
-# RHS → LTO → LHS → RTO → RHS  (standard walking order)
-#
-# Strategy
-# --------
-# 1. Remove spurious RHS peaks: any RHS < min_stride apart from its
-#    predecessor AND with no LHS in between is a double-detection and
-#    is dropped before cycle search.
-# 2. For each remaining RHS-RHS window check:
-#    a. Exactly one LTO, one LHS, one RTO inside the window.
-#    b. Strict walking order: LTO < LHS < RTO.
-#    c. LTO falls within the first lto_max_frac of the cycle
-#       (walking LTO ≈ 10-15 %; step-up LTO ≈ 50 %).
-#    d. Duration within [min_dur, max_dur].
-# =========================================================
+# Cycle extraction
 
 def _remove_false_rhs(rhs, lhs, fs, min_stride=0.8):
     """Drop RHS events whose gap from the previous kept RHS is < min_stride
     AND which contain no LHS event in that gap (double-peak artefact)."""
-
     rhs  = np.sort(rhs)
     lhs  = np.sort(lhs)
     keep = np.ones(len(rhs), dtype=bool)
 
-    prev = 0   # index of last kept event
+    prev = 0
     for i in range(1, len(rhs)):
         if not keep[prev]:
             prev = i
@@ -104,8 +209,8 @@ def _remove_false_rhs(rhs, lhs, fs, min_stride=0.8):
         if gap < min_stride:
             lhs_between = lhs[(lhs > rhs[prev]) & (lhs < rhs[i])]
             if len(lhs_between) == 0:
-                keep[i] = False     # remove the short-interval RHS
-                continue            # prev stays the same
+                keep[i] = False
+                continue
         prev = i
 
     return rhs[keep]
@@ -129,7 +234,6 @@ def extract_valid_gait_cycles(
     print(f"\nDetected events:  RHS={len(rhs)}  LTO={len(lto)}  "
           f"LHS={len(lhs)}  RTO={len(rto)}")
 
-    # ── step 1: remove double-detected RHS peaks ────────────────────
     rhs_clean = _remove_false_rhs(rhs, lhs, fs)
     n_removed = len(rhs) - len(rhs_clean)
     print(f"  RHS after artefact removal: {len(rhs_clean)}  "
@@ -139,18 +243,16 @@ def extract_valid_gait_cycles(
         print("Fewer than 2 RHS events after cleaning — cannot extract cycles.")
         return pd.DataFrame()
 
-    cycles            = []
-    rej_count         = 0   # wrong number of events in window
-    rej_order         = 0   # LTO/LHS/RTO not in walking order
-    rej_early_lto     = 0   # LTO too late (step-up, not walking)
-    rej_duration      = 0   # cycle duration out of range
+    cycles        = []
+    rej_count     = 0
+    rej_order     = 0
+    rej_early_lto = 0
+    rej_duration  = 0
 
     for i in range(len(rhs_clean) - 1):
-
         rhs1 = rhs_clean[i]
         rhs2 = rhs_clean[i + 1]
 
-        # ── a. collect events in window ─────────────────────────────
         lto_i = lto[(lto > rhs1) & (lto < rhs2)]
         lhs_i = lhs[(lhs > rhs1) & (lhs < rhs2)]
         rto_i = rto[(rto > rhs1) & (rto < rhs2)]
@@ -163,20 +265,17 @@ def extract_valid_gait_cycles(
         lhs_ev = lhs_i[0]
         rto_ev = rto_i[0]
 
-        # ── b. strict walking order: LTO < LHS < RTO ────────────────
         if not (lto_ev < lhs_ev < rto_ev):
             rej_order += 1
             continue
 
-        dur = (rhs2 - rhs1) / fs
-
-        # ── c. LTO timing: must be early in cycle (walking) ─────────
+        dur      = (rhs2 - rhs1) / fs
         lto_frac = (lto_ev - rhs1) / (rhs2 - rhs1)
+
         if lto_frac > lto_max_frac:
             rej_early_lto += 1
             continue
 
-        # ── d. duration ──────────────────────────────────────────────
         if not (min_dur <= dur <= max_dur):
             rej_duration += 1
             continue
@@ -217,10 +316,9 @@ def extract_valid_gait_cycles(
     return cycles_df
 
 
-# QC Summary
+# QC reporting
 
 def event_quality_report(events_df, cycles_df):
-
     return {
         "total_events": len(events_df),
         "RHS":          int((events_df["event"] == "RHS").sum()),
@@ -230,28 +328,16 @@ def event_quality_report(events_df, cycles_df):
         "valid_cycles": len(cycles_df),
     }
 
+# QC plots
 
-# QC Plot
-
-def plot_gait_qc(
-    L_signal,
-    R_signal,
-    lhs,
-    lto,
-    rhs,
-    rto,
-    cycles_df,
-    fs,
-    out_file,
-):
+def plot_gait_qc(L_signal, R_signal, lhs, lto, rhs, rto, cycles_df, fs, out_file):
     t = np.arange(len(L_signal)) / fs
 
     fig = plt.figure(figsize=(16, 10))
     ax0 = fig.add_subplot(3, 1, 1)
     ax1 = fig.add_subplot(3, 1, 2, sharex=ax0)
-    ax2 = fig.add_subplot(3, 1, 3)   # histogram — independent x-axis
+    ax2 = fig.add_subplot(3, 1, 3)
 
-    # ── left heel ────────────────────────────────────────────────────
     ax0.plot(t, L_signal, color="forestgreen", lw=0.8)
     ax0.scatter(lhs / fs, L_signal[lhs], color="magenta",
                 s=25, zorder=3, label="LHS")
@@ -261,17 +347,14 @@ def plot_gait_qc(
     ax0.set_title("Left heel AP trajectory (pelvis-referenced)")
     ax0.legend(loc="upper right", fontsize=8)
 
-    # ── right heel ───────────────────────────────────────────────────
     ax1.plot(t, R_signal, color="firebrick", lw=0.8)
     ax1.scatter(rhs / fs, R_signal[rhs], color="black",
                 s=25, zorder=3, label="RHS")
     ax1.scatter(rto / fs, R_signal[rto], color="darkorange",
                 s=25, zorder=3, label="RTO")
-
     for _, row in cycles_df.iterrows():
         ax1.axvspan(row["rhs_start_s"], row["rhs_end_s"],
                     color="limegreen", alpha=0.20)
-
     ax1.set_xlabel("Time (s)")
     ax1.set_ylabel("Rel. position (m)")
     ax1.set_title(
@@ -280,7 +363,6 @@ def plot_gait_qc(
     )
     ax1.legend(loc="upper right", fontsize=8)
 
-    # ── duration histogram ───────────────────────────────────────────
     if len(cycles_df) > 0:
         ax2.hist(cycles_df["duration_s"], bins=20,
                  color="steelblue", edgecolor="white")
@@ -306,8 +388,6 @@ def plot_gait_qc(
     plt.close()
 
 
-# Plot a segment of the gait events
-
 def plot_gait_segment(
     L_signal,
     R_signal,
@@ -320,9 +400,8 @@ def plot_gait_segment(
     out_file,
     t_start=10.0,
     duration=10.0,
-):
-    t = np.arange(len(L_signal)) / fs
-
+    ):
+    t  = np.arange(len(L_signal)) / fs
     i0 = int(t_start * fs)
     i1 = int((t_start + duration) * fs)
     t_seg = t[i0:i1]
