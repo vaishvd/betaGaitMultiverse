@@ -26,7 +26,8 @@ def load_raw_for_ica(subject: str, sigclean_dir: Path) -> mne.io.BaseRaw:
 def run_ica(
     epochs: mne.Epochs,
     n_components: float | int = 0.99,
-    method: str = "fastica",
+    method: str = "infomax",
+    fit_params: dict | None = None,
     decim: int = 2,
     random_state: int = 42,
 ) -> mne.preprocessing.ICA:
@@ -36,6 +37,7 @@ def run_ica(
     Parameters
     ----------
     n_components  : float (variance threshold) or int (explicit count)
+    fit_params    : extra kwargs forwarded to mne.preprocessing.ICA (e.g. dict(extended=True))
     decim         : decimation factor during fitting (speeds up computation)
 
     Returns
@@ -48,6 +50,7 @@ def run_ica(
     ica = mne.preprocessing.ICA(
         n_components=n_components,
         method=method,
+        fit_params=fit_params,
         random_state=random_state,
         max_iter="auto",
     )
@@ -92,7 +95,7 @@ def label_and_mark_ica(
     for i, (label, prob_vec) in enumerate(zip(labels, probs)):
         prob   = float(prob_vec.max())
         keep   = label == "brain" and prob >= brain_thresh
-        marker = "✓" if keep else "✗"
+        marker = "+" if keep else "-"
         print(f"    {marker}  IC{i:03d}  {label:<20}  p={prob:.2f}")
         (brain_ics if keep else exclude_ics).append(i)
 
@@ -125,7 +128,7 @@ def save_ica_component_plots(
         out = output_dir / f"sub-{subject}_ica_topos_{k:02d}.png"
         fig.savefig(out, dpi=150, bbox_inches="tight")
         plt.close(fig)
-        print(f"  ICA topos        → {out.name}")
+        print(f"  ICA topos        -> {out.name}")
 
 
 def apply_iclabel(ica: mne.preprocessing.ICA, epochs: mne.Epochs):

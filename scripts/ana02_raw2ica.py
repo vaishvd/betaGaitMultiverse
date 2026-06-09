@@ -1,23 +1,31 @@
 """
 ana02_raw2ica.py
 ================
-Preprocess continuous EEG and fit ICA decomposition.
-IC rejection is handled separately in ana03_ica2clean.py.
+# Standing (STAND) and walking (CS) recordings are concatenated before
+# preprocessing so that filtering, referencing, bad-channel interpolation,
+# and ICA decomposition are applied identically to both conditions.
+# ICA is fitted on epochs drawn from the full concatenated recording,
+# giving more data for decomposition and ensuring the same component
+# structure is used for both conditions.
+# Condition boundaries are stored as annotations ("STAND", "CS") in the
+# concatenated raw for downstream segment extraction.
+# See: Makeig et al. 1996 J Neurosci; Delorme et al. 2012 Front Hum Neurosci
 
 Input
 -----
-d00_raw/  sub-{sub}/eeg/sub-{sub}_task-{TASK}.vhdr
+d00_raw/  sub-{sub}/eeg/sub-{sub}_task-STAND.vhdr
+d00_raw/  sub-{sub}/eeg/sub-{sub}_task-CS.vhdr
 
 Output
 ------
 d02_prep/
-    sub-{sub}_clean_raw.fif          preprocessed continuous raw
-    sub-{sub}_preica_clean_epo.fif   AutoReject-cleaned epochs for ICA fit
-    sub-{sub}_ica.fif                fitted ICA (no components excluded)
-    sub-{sub}_ica_topos_*.png        component topography plots
-    sub-{sub}_psd.png                PSD quality check
+    sub-{sub}_concat_raw.fif           preprocessed concatenated (STAND+CS) raw
+    sub-{sub}_preica_clean_epo.fif     AutoReject-cleaned epochs for ICA fit
+    sub-{sub}_ica.fif                  fitted ICA (no components excluded)
 """
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
@@ -29,17 +37,19 @@ from src.ica_utils import run_ica, save_ica_component_plots
 
 DATASET  = "stepup"
 SUBJECTS = ["S1"]
-TASK     = "CS"
 
-TARGET_SFREQ = 250
-L_FREQ = 1.0
-LINE_FREQ = 50
+TASK_STAND = "STAND"
+TASK_WALK  = "CS"
+
+TARGET_SFREQ       = 250
+L_FREQ             = 1.0
+LINE_FREQ          = 50
 BAD_CHAN_THRESHOLD = 3.0
-EPOCH_DUR = 2.0
-N_COMPONENTS = 0.99
-RANDOM_STATE = 42
+EPOCH_DUR          = 2.0
+N_COMPONENTS       = 0.99
+RANDOM_STATE       = 42
 
-dirs = get_dataset_dirs(DATASET)
+dirs     = get_dataset_dirs(DATASET)
 RAW_DIR  = dirs["raw"]
 PREP_DIR = dirs["prep"]
 
@@ -47,82 +57,108 @@ for subject in SUBJECTS:
 
     print(f"\nProcessing sub-{subject}")
 
-    vhdr_file = (
+    stand_vhdr = (
         RAW_DIR / f"sub-{subject}" / "eeg"
-        / f"sub-{subject}_task-{TASK}.vhdr"
+        / f"sub-{subject}_task-{TASK_STAND}.vhdr"
+    )
+    walk_vhdr = (
+        RAW_DIR / f"sub-{subject}" / "eeg"
+        / f"sub-{subject}_task-{TASK_WALK}.vhdr"
     )
 
-    raw = mne.io.read_raw_brainvision(vhdr_file, preload=True, verbose=False)
-    raw.pick_types(eeg=True)
+    # Load STAND and CS recordings 
 
-    raw = drop_invalid_channels(raw)
-
-    # Montage
-
-    raw.pick("eeg")
+    print("  Loading STAND recording ...")
+    raw_stand = mne.io.read_raw_brainvision(stand_vhdr, preload=True, verbose=False)
+    raw_stand.pick_types(eeg=True)
+    raw_stand = drop_invalid_channels(raw_stand)
+    raw_stand.pick("eeg")
     montage = mne.channels.make_standard_montage("standard_1005")
-    raw.set_montage(montage, on_missing="ignore")
-    raw.plot_sensors(show_names=True)
+    raw_stand.set_montage(montage, on_missing="ignore")
 
-    # Resample
+    print("  Loading CS (walking) recording ...")
+    raw_walk = mne.io.read_raw_brainvision(walk_vhdr, preload=True, verbose=False)
+    raw_walk.pick_types(eeg=True)
+    raw_walk = drop_invalid_channels(raw_walk)
+    raw_walk.pick("eeg")
+    raw_walk.set_montage(montage, on_missing="ignore")
 
-    if raw.info["sfreq"] > TARGET_SFREQ:
-        raw.resample(TARGET_SFREQ)
+    # Verify compatibility of STAND and CS recordings before concatenation
 
-    # Filtering
+    if raw_stand.ch_names != raw_walk.ch_names:
+        raise RuntimeError(
+            f"sub-{subject}: STAND and CS have different channel names.\n"
+            f"  STAND ({len(raw_stand.ch_names)} ch): {raw_stand.ch_names[:5]}...\n"
+            f"  CS    ({len(raw_walk.ch_names)} ch): {raw_walk.ch_names[:5]}..."
+        )
+    if raw_stand.info["sfreq"] != raw_walk.info["sfreq"]:
+        raise RuntimeError(
+            f"sub-{subject}: STAND sfreq ({raw_stand.info['sfreq']}) != "
+            f"CS sfreq ({raw_walk.info['sfreq']})"
+        )
 
-    raw.filter(l_freq=L_FREQ, h_freq=60, fir_design="firwin")
-    raw.notch_filter(freqs=LINE_FREQ)
+    print(f"  STAND: {raw_stand.n_times} samples  {raw_stand.times[-1]:.1f} s  "
+          f"sfreq={raw_stand.info['sfreq']:.0f} Hz")
+    print(f"  CS   : {raw_walk.n_times} samples  {raw_walk.times[-1]:.1f} s")
 
-    # BAD CHANNEL DETECTION 
+    #  Concatenate and add condition annotations
 
-    data = raw.get_data()
+    # Compute segment boundaries before concatenation (in seconds at original sfreq)
+    stand_dur  = raw_stand.times[-1]
+    walk_dur   = raw_walk.times[-1]
+    walk_onset = float(raw_stand.n_times) / raw_stand.info["sfreq"]
 
-    ptp = np.ptp(data, axis=1)
-    z = (ptp - np.mean(ptp)) / np.std(ptp)
+    raw_concat = mne.concatenate_raws([raw_stand, raw_walk], preload=True)
 
+    # Annotate condition boundaries for downstream segment extraction
+    raw_concat.annotations.append(onset=0.0,        duration=stand_dur, description="STAND")
+    raw_concat.annotations.append(onset=walk_onset, duration=walk_dur,  description="CS")
+
+    print(f"  Concatenated: {raw_concat.n_times} samples  "
+          f"{raw_concat.times[-1]:.1f} s  sfreq={raw_concat.info['sfreq']:.0f} Hz")
+
+    # Preprocess concatenated raw
+
+    if raw_concat.info["sfreq"] > TARGET_SFREQ:
+        raw_concat.resample(TARGET_SFREQ)
+        print(f"  Resampled to {TARGET_SFREQ} Hz")
+
+    raw_concat.filter(l_freq=L_FREQ, h_freq=60, fir_design="firwin")
+    raw_concat.notch_filter(freqs=LINE_FREQ)
+
+    data    = raw_concat.get_data()
+    ptp     = np.ptp(data, axis=1)
+    z       = (ptp - np.mean(ptp)) / np.std(ptp)
     bad_idx = np.where(np.abs(z) > BAD_CHAN_THRESHOLD)[0]
-    bads = [raw.ch_names[i] for i in bad_idx]
-
+    bads    = [raw_concat.ch_names[i] for i in bad_idx]
     print(f"  Bad channels detected: {bads}")
 
-
-    # INTERPOLATE 
-
-    raw.info["bads"] = bads
+    raw_concat.info["bads"] = bads
     if len(bads) > 0:
-        raw.interpolate_bads(reset_bads=True)
+        raw_concat.interpolate_bads(reset_bads=True)
 
+    raw_concat.set_eeg_reference("average", projection=False)
 
-    # Average reference
+    # Save preprocessed concatenated raw 
 
-    raw.set_eeg_reference("average", projection=False)
+    concat_out = PREP_DIR / f"sub-{subject}_concat_raw.fif"
+    raw_concat.save(concat_out, overwrite=True)
+    print(f"  Saved concat raw -> {concat_out.name}")
 
-    # Save clean raw
+    # ICA training epochs from full concatenated raw 
 
-    clean_raw_out = PREP_DIR / f"sub-{subject}_clean_raw.fif"
-    raw.save(clean_raw_out, overwrite=True)
-
-    print(f"  Saved clean raw → {clean_raw_out.name}")
-
-    # ICA EPOCHS
-
-    events = mne.make_fixed_length_events(raw, duration=EPOCH_DUR)
-
+    events = mne.make_fixed_length_events(raw_concat, duration=EPOCH_DUR)
     epochs = mne.Epochs(
-        raw, events,
+        raw_concat, events,
         tmin=0, tmax=EPOCH_DUR,
         baseline=None,
         preload=True,
         reject_by_annotation=False,
         verbose=False,
     )
-
     epochs = epochs.pick_types(eeg=True)
-
     epochs = drop_invalid_eeg_channels(epochs)
-
-    print(f"  Epochs: {len(epochs)} × {len(epochs.ch_names)} ch")
+    print(f"  Epochs: {len(epochs)} x {len(epochs.ch_names)} ch")
 
     # AutoReject
 
@@ -131,11 +167,8 @@ for subject in SUBJECTS:
         random_state=RANDOM_STATE,
         n_jobs=1,
     )
-
     ar.fit(epochs)
-
     epochs_clean, reject_log = ar.transform(epochs, return_log=True)
-
     print(f"  Clean epochs: {len(epochs_clean)}")
 
     if len(epochs_clean) < 20:
@@ -143,10 +176,19 @@ for subject in SUBJECTS:
 
     save_epochs(epochs_clean, PREP_DIR, subject)
 
-    # ICA
+    # Fit ICA 
+
+    # Extended Infomax ICA (Lee et al. 1999, Neural Computation 11:417-441).
+    # Adaptively estimates sub- and super-Gaussian sources, making it more
+    # appropriate for EEG than standard FastICA which assumes super-Gaussian
+    # sources only. Extended Infomax is the decomposition used to train
+    # ICLabel (Pion-Tonachini et al. 2019, NeuroImage), reducing classifier
+    # mismatch. Used as default in EEGLAB (Delorme & Makeig 2004).
     ica = run_ica(
         epochs_clean,
         n_components=N_COMPONENTS,
+        method="infomax",
+        fit_params=dict(extended=True),
         random_state=RANDOM_STATE,
     )
 
