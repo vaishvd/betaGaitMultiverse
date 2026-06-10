@@ -23,7 +23,6 @@ from pathlib import Path
 from scipy.signal import butter, filtfilt, find_peaks
 
  
-
 # Tracked-point labels used to identify each logical marker.
 # These match the 'tracked_point' column in the BIDS channels.tsv.
 
@@ -41,22 +40,30 @@ AXIS_SUFFIX = "PosY"
 def resolve_marker_cols(channels_file):
     """
     Derive the three required marker column names from a BIDS channels.tsv.
- 
-    Matches rows by ``tracked_point`` (values in TRACKED_POINT_MAP) and
-    selects the channel whose ``name`` ends with AXIS_SUFFIX (``PosY``).
- 
+
+    Reads the ``tracked_point`` column to identify left heel (LHEE), right
+    heel (RHEE), and pelvis (PELV) markers, then selects the channel whose
+    name ends with ``AXIS_SUFFIX`` (``PosY``, anterior-posterior axis).
+    Column resolution is fully data-driven — no column names are hardcoded.
+
     Parameters
     ----------
     channels_file : str | Path
- 
+        Path to the BIDS ``*_channels.tsv`` companion file.
+
     Returns
     -------
     marker_cols : dict
-        {"LHEE": "<col>", "RHEE": "<col>", "PELV": "<col>"}
- 
+        Mapping ``{"LHEE": col_name, "RHEE": col_name, "PELV": col_name}``
+        where each value is the exact column name in the motion TSV.
+
     Raises
     ------
-    FileNotFoundError, ValueError
+    FileNotFoundError
+        If ``channels_file`` does not exist.
+    ValueError
+        If required columns are absent or a marker has zero or multiple
+        matching channels.
     """
     channels_file = Path(channels_file)
     if not channels_file.exists():
@@ -96,31 +103,39 @@ def resolve_marker_cols(channels_file):
  
     print(f"  Marker columns resolved from {channels_file.name}:")
     for k, v in marker_cols.items():
-        print(f"    {k} → {v}")
+        print(f"    {k} -> {v}")
  
     return marker_cols
 
 
 def load_motion(motion_file):
     """
-    Load a motion-capture TSV file with or without column headers, and
-    return both the DataFrame and the resolved marker column mapping.
- 
-    Column names are always resolved from the companion channels.tsv
-    (``{motion_stem}_channels.tsv``), so no column names are hardcoded.
- 
+    Load a motion-capture TSV file and resolve marker column names.
+
+    Column names are always read from the companion ``*_channels.tsv``
+    file so no column names are hardcoded in the pipeline. If the motion
+    TSV has no header row, column names are assigned from the channels file.
+
     Parameters
     ----------
     motion_file : str | Path
- 
+        Path to the BIDS motion TSV (e.g. ``sub-S1_task-CS.tsv``).
+        The companion ``*_channels.tsv`` must exist in the same directory.
+
     Returns
     -------
     df : pd.DataFrame
-    marker_cols : dict  {"LHEE": col, "RHEE": col, "PELV": col}
- 
+        Motion data with named columns.
+    marker_cols : dict
+        ``{"LHEE": col, "RHEE": col, "PELV": col}`` — see
+        :func:`resolve_marker_cols`.
+
     Raises
     ------
-    FileNotFoundError, ValueError
+    FileNotFoundError
+        If ``motion_file`` or the companion channels file does not exist.
+    ValueError
+        If marker columns cannot be resolved from the channels file.
     """
     motion_file   = Path(motion_file)
     channels_file = motion_file.with_name(motion_file.stem + "_channels.tsv")
@@ -142,11 +157,49 @@ def load_motion(motion_file):
 # Signal processing
 
 def lowpass(signal, fs, cutoff=6.0):
+    """
+    Apply a 4th-order zero-phase Butterworth low-pass filter.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        1-D input signal.
+    fs : float
+        Sampling frequency in Hz.
+    cutoff : float, optional
+        Low-pass cutoff frequency in Hz. Default 6.0 Hz.
+
+    Returns
+    -------
+    np.ndarray
+        Filtered signal, same shape as input.
+    """
     b, a = butter(4, cutoff / (fs / 2), btype="low")
     return filtfilt(b, a, signal)
 
 
 def heel_relative_signal(heel, pelvis):
+    """
+    Compute pelvis-referenced heel displacement and remove DC offset.
+
+    Subtracts the pelvis anterior-posterior position from the heel
+    position to isolate heel motion relative to the centre of mass,
+    then removes the mean to zero-centre the signal. This reference
+    removes whole-body translation and reduces low-frequency drift,
+    improving peak detection reliability.
+
+    Parameters
+    ----------
+    heel : np.ndarray
+        Raw heel marker position (anterior-posterior axis, metres).
+    pelvis : np.ndarray
+        Raw pelvis marker position (anterior-posterior axis, metres).
+
+    Returns
+    -------
+    np.ndarray
+        Zero-mean pelvis-referenced heel signal.
+    """
     sig = heel - pelvis
     sig = sig - np.mean(sig)
     return sig
@@ -178,6 +231,28 @@ def detect_gait_events(signal, fs, cutoff=6.0, min_step_time=0.5):
 # Build events dataframe
 
 def build_events_dataframe(lhs, lto, rhs, rto, fs):
+    """
+    Combine all four gait event arrays into a single sorted DataFrame.
+
+    Parameters
+    ----------
+    lhs : np.ndarray
+        Left heel-strike sample indices.
+    lto : np.ndarray
+        Left toe-off sample indices.
+    rhs : np.ndarray
+        Right heel-strike sample indices.
+    rto : np.ndarray
+        Right toe-off sample indices.
+    fs : float
+        Sampling frequency in Hz, used to compute onset times in seconds.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``onset_s`` (float), ``sample`` (int), ``event`` (str).
+        Sorted by sample index, reset index.
+    """
     rows = (
         [(s / fs, s, "LHS") for s in lhs] +
         [(s / fs, s, "LTO") for s in lto] +
@@ -194,8 +269,30 @@ def build_events_dataframe(lhs, lto, rhs, rto, fs):
 # Cycle extraction
 
 def _remove_false_rhs(rhs, lhs, fs, min_stride=0.8):
-    """Drop RHS events whose gap from the previous kept RHS is < min_stride
-    AND which contain no LHS event in that gap (double-peak artefact)."""
+    """
+    Remove spurious double-detected right heel-strike peaks.
+
+    A candidate RHS is dropped if its gap from the previous kept RHS
+    is shorter than ``min_stride`` AND no left heel-strike (LHS) event
+    falls within that gap. This pattern is characteristic of a split
+    double-peak from a single heel strike rather than two distinct steps.
+
+    Parameters
+    ----------
+    rhs : np.ndarray
+        Right heel-strike sample indices (unsorted accepted).
+    lhs : np.ndarray
+        Left heel-strike sample indices.
+    fs : float
+        Sampling frequency in Hz.
+    min_stride : float, optional
+        Minimum valid stride duration in seconds. Default 0.8 s.
+
+    Returns
+    -------
+    np.ndarray
+        Filtered RHS indices with double-detections removed.
+    """
     rhs  = np.sort(rhs)
     lhs  = np.sort(lhs)
     keep = np.ones(len(rhs), dtype=bool)
@@ -226,6 +323,45 @@ def extract_valid_gait_cycles(
     max_dur=2.0,
     lto_max_frac=0.30,
 ):
+    """
+    Extract biomechanically valid level-walking gait cycles.
+
+    A valid cycle is defined as a RHS-to-RHS window that contains
+    exactly one LTO, one LHS, and one RTO in the correct temporal order
+    (LTO < LHS < RTO), with LTO occurring within the first
+    ``lto_max_frac`` of the cycle (distinguishes level walking from
+    step-up kinematics where LTO occurs later).
+
+    Parameters
+    ----------
+    lhs : np.ndarray
+        Left heel-strike sample indices.
+    lto : np.ndarray
+        Left toe-off sample indices.
+    rhs : np.ndarray
+        Right heel-strike sample indices.
+    rto : np.ndarray
+        Right toe-off sample indices.
+    fs : float
+        Sampling frequency in Hz.
+    min_dur : float, optional
+        Minimum valid cycle duration in seconds. Default 0.8 s.
+    max_dur : float, optional
+        Maximum valid cycle duration in seconds. Default 2.0 s.
+    lto_max_frac : float, optional
+        Maximum LTO position as fraction of cycle duration. Default 0.30.
+        Cycles where LTO > 30% are classified as step-up kinematics
+        and excluded.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per valid cycle. Columns: ``cycle_id``, ``rhs_start``,
+        ``lto``, ``lhs``, ``rto``, ``rhs_end`` (sample indices),
+        ``rhs_start_s``, ``lto_s``, ``lhs_s``, ``rto_s``, ``rhs_end_s``
+        (times in seconds), ``duration_s``, ``lto_frac``.
+        Empty DataFrame if no valid cycles are found.
+    """
     lhs = np.sort(lhs)
     lto = np.sort(lto)
     rhs = np.sort(rhs)
@@ -298,7 +434,7 @@ def extract_valid_gait_cycles(
 
     cycles_df = pd.DataFrame(cycles)
 
-    print(f"\nCycle QC  (level-walking: RHS → LTO → LHS → RTO → RHS)")
+    print(f"\nCycle QC  (level-walking: RHS -> LTO -> LHS -> RTO -> RHS)")
     print(f"  Windows checked          : {len(rhs_clean) - 1}")
     print(f"  Valid cycles             : {len(cycles_df)}")
     print(f"  Rejected — event count   : {rej_count}")
@@ -319,6 +455,22 @@ def extract_valid_gait_cycles(
 # QC reporting
 
 def event_quality_report(events_df, cycles_df):
+    """
+    Summarise detected gait event counts and valid cycle count.
+
+    Parameters
+    ----------
+    events_df : pd.DataFrame
+        Output of :func:`build_events_dataframe`.
+    cycles_df : pd.DataFrame
+        Output of :func:`extract_valid_gait_cycles`.
+
+    Returns
+    -------
+    dict
+        Keys: ``total_events``, ``RHS``, ``LTO``, ``LHS``, ``RTO``,
+        ``valid_cycles``.
+    """
     return {
         "total_events": len(events_df),
         "RHS":          int((events_df["event"] == "RHS").sum()),
@@ -331,6 +483,29 @@ def event_quality_report(events_df, cycles_df):
 # QC plots
 
 def plot_gait_qc(L_signal, R_signal, lhs, lto, rhs, rto, cycles_df, fs, out_file):
+    """
+    Save a three-panel gait QC figure for visual inspection.
+
+    Panel 1: Left heel AP trajectory with LHS and LTO markers.
+    Panel 2: Right heel AP trajectory with RHS and RTO markers;
+            valid cycles shaded green.
+    Panel 3: Histogram of valid gait cycle durations with mean line.
+
+    Parameters
+    ----------
+    L_signal : np.ndarray
+        Pelvis-referenced left heel signal.
+    R_signal : np.ndarray
+        Pelvis-referenced right heel signal.
+    lhs, lto, rhs, rto : np.ndarray
+        Gait event sample indices.
+    cycles_df : pd.DataFrame
+        Output of :func:`extract_valid_gait_cycles`.
+    fs : float
+        Sampling frequency in Hz.
+    out_file : str | Path
+        Output path for the saved PNG.
+    """
     t = np.arange(len(L_signal)) / fs
 
     fig = plt.figure(figsize=(16, 10))
@@ -401,6 +576,32 @@ def plot_gait_segment(
     t_start=10.0,
     duration=10.0,
     ):
+    """
+    Save a two-panel figure showing a short segment of gait events.
+
+    Plots a fixed-duration window of the left and right heel trajectories
+    with all detected events marked and valid cycles shaded, for detailed
+    visual inspection of event detection quality.
+
+    Parameters
+    ----------
+    L_signal : np.ndarray
+        Pelvis-referenced left heel signal.
+    R_signal : np.ndarray
+        Pelvis-referenced right heel signal.
+    lhs, lto, rhs, rto : np.ndarray
+        Gait event sample indices.
+    cycles_df : pd.DataFrame
+        Output of :func:`extract_valid_gait_cycles`.
+    fs : float
+        Sampling frequency in Hz.
+    out_file : str | Path
+        Output path for the saved PNG.
+    t_start : float, optional
+        Start time of the window in seconds. Default 10.0 s.
+    duration : float, optional
+        Window duration in seconds. Default 10.0 s.
+    """
     t  = np.arange(len(L_signal)) / fs
     i0 = int(t_start * fs)
     i1 = int((t_start + duration) * fs)
