@@ -22,6 +22,7 @@ DIR_PROJ = Path(__file__).resolve().parents[1]
 DIR_DATASETS = define_dir(DIR_PROJ, "datasets")
 DIR_RESULTS  = define_dir(DIR_PROJ, "results")
 DIR_PLOTS    = define_dir(DIR_RESULTS, "plots")
+DIR_QC       = define_dir(DIR_RESULTS, "qc")
 
 # Dataset-specific directories will be defined in the DATASETS dict below, which allows for flexible handling of multiple datasets with different structures
 DATASETS = {
