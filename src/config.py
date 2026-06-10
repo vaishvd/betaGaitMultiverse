@@ -1,5 +1,12 @@
 from pathlib import Path
 
+# Active dataset and subject list.
+# Change DATASET to switch between "stepup" and "splitbelt".
+# SUBJECTS will be expanded to the full cohort before batch processing.
+DATASET  = "stepup"   # active dataset key
+SUBJECTS = ["S1", "S2", "S3", "S4"]     # subjects to process in batch
+
+
 def define_dir(root, *names):
     """Creates a directory and ensures it exists."""
     path = root
@@ -46,6 +53,7 @@ DATASETS = {
         "root": define_dir(DIR_DATASETS, "stepupAms"),
 
         "dirs": {
+            "qc":         "d00_qc",
             "raw":        "d00_raw",
             "gait_events":"d01_gaitevents",
 
