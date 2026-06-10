@@ -14,15 +14,11 @@ ana05_gaitcycles2tfr.py
 Input
 -----
 d03_clean/
-    sub-{sub}_desc-icaClean_raw.fif   (channel reference + ICA)
-    sub-{sub}_ica-clean.fif
+    sub-{sub}_desc-icaClean_concat_raw.fif   (ICA-cleaned concatenated STAND+CS raw)
 
 d04_gaitepochs/
     sub-{sub}_gait_segments.npy       object array (n_cycles,), each (n_ch, n_samp_i)
     sub-{sub}_gait_sfreq.npy          scalar float
-
-d00_raw/
-    sub-{sub}/eeg/sub-{sub}_task-STAND.vhdr
 
 Output
 ------
@@ -31,18 +27,12 @@ d05_ersp/
 """
 
 import numpy as np
+import pandas as pd
 import mne
 
 from src.paths import get_dataset_dirs
-from src.preprocessing import drop_invalid_channels
-
-DATASET  = "stepup"
-SUBJECTS = ["S1"]
-
-TASK_STAND = "STAND"
-
-TARGET_SFREQ       = 250
-BAD_CHAN_THRESHOLD = 3.0
+from src.config import DATASET, SUBJECTS
+from src.qc import log_qc
 
 FREQS    = np.arange(13, 31, dtype=float)   # beta band 13-30 Hz
 N_CYCLES = FREQS / 2.0                      # frequency-dependent wavelet width
@@ -57,207 +47,320 @@ EDGE_CROP = 0.05                            # fraction trimmed at each edge post
 # This is flagged as a limitation; multiverse will fork on EDGE_CROP.
 # See: Cohen 2014 "Analyzing Neural Time Series Data", MIT Press, Ch. 13
 
-L_FREQ    = 1.0
-LINE_FREQ = 50
-
 AMP_THRESH_BASELINE = 350e-6
 AMP_THRESH_CYCLE    = 350e-6
 
 dirs = get_dataset_dirs(DATASET)
 
-RAW_DIR       = dirs["raw"]
 CLEAN_DIR     = dirs["clean"]
 GAITEPOCH_DIR = dirs["gaitepochs"]
 ERSP_DIR      = dirs["ersp"]
+QC_DIR        = dirs["qc"]
 
 
 for subject in SUBJECTS:
+    try:
+        print(f"ERSP: sub-{subject}")
 
-    print(f"ERSP: sub-{subject}")
+        # Load ICA-cleaned concatenated raw; preload=True so STAND segment can be extracted
+        clean_fif    = CLEAN_DIR / f"sub-{subject}_desc-icaClean_concat_raw.fif"
+        concat_raw   = mne.io.read_raw_fif(clean_fif, preload=True, verbose=False)
+        ch_names_ref = list(concat_raw.ch_names)
+        print(f"  Reference channels from clean raw: {len(ch_names_ref)}")
 
-    # CHANNEL REFERENCE FROM ICA-CLEAN RAW
+        # Load Gait Segments
 
-    clean_fif     = CLEAN_DIR / f"sub-{subject}_desc-icaClean_raw.fif"
-    raw_ref       = mne.io.read_raw_fif(clean_fif, preload=False, verbose=False)
-    ch_names_ref  = list(raw_ref.ch_names)
-    print(f"  Reference channels from clean raw: {len(ch_names_ref)}")
+        seg_path   = GAITEPOCH_DIR / f"sub-{subject}_gait_segments.npy"
+        sfreq_path = GAITEPOCH_DIR / f"sub-{subject}_gait_sfreq.npy"
 
-    # Load Gait Segments and Check Cleaned Data Quality
-
-    seg_path   = GAITEPOCH_DIR / f"sub-{subject}_gait_segments.npy"
-    sfreq_path = GAITEPOCH_DIR / f"sub-{subject}_gait_sfreq.npy"
-
-    if not seg_path.exists():
-        print(f"  Gait segments not found: {seg_path.name} -- skipping.")
-        continue
-
-    gait_segments = np.load(seg_path, allow_pickle=True)
-    gait_sfreq    = float(np.load(sfreq_path))
-
-    print(f"  Gait segments: {len(gait_segments)}  sfreq={gait_sfreq:.0f} Hz")
-
-    # Standing baseline  
-
-    stand_file = (
-        RAW_DIR
-        / f"sub-{subject}"
-        / "eeg"
-        / f"sub-{subject}_task-{TASK_STAND}.vhdr"
-    )
-
-    raw_stand = mne.io.read_raw_brainvision(stand_file, preload=True, verbose=False)
-    raw_stand.pick(ch_names_ref, verbose=False)
-    raw_stand = drop_invalid_channels(raw_stand)
-
-    if raw_stand.info["sfreq"] > TARGET_SFREQ:
-        raw_stand.resample(TARGET_SFREQ)
-
-    raw_stand.filter(l_freq=L_FREQ, h_freq=60, fir_design="firwin")
-    raw_stand.notch_filter(freqs=LINE_FREQ)
-
-    data = raw_stand.get_data()
-    ptp  = np.ptp(data, axis=1)
-    z    = (ptp - np.mean(ptp)) / np.std(ptp)
-    bads = [raw_stand.ch_names[i] for i in np.where(np.abs(z) > BAD_CHAN_THRESHOLD)[0]]
-    print(f"  Bad channels detected: {bads}")
-
-    raw_stand.info["bads"] = bads
-    if len(bads) > 0:
-        raw_stand.interpolate_bads(reset_bads=True)
-
-    raw_stand.set_eeg_reference("average", projection=False)
-
-    ica = mne.preprocessing.read_ica(
-        CLEAN_DIR / f"sub-{subject}_ica-clean.fif", verbose=False
-    )
-    ica.apply(raw_stand, verbose=False)
-
-    stand_sfreq  = raw_stand.info["sfreq"]
-    stand_ch_names = list(raw_stand.ch_names)
-
-    events = mne.make_fixed_length_events(raw_stand, duration=2.0)
-    stand_epochs = mne.Epochs(
-        raw_stand, events,
-        tmin=0, tmax=2.0,
-        baseline=None,
-        preload=True,
-        reject_by_annotation=False,
-        verbose=False,
-    )
-    stand_epochs.drop_bad(reject=dict(eeg=AMP_THRESH_BASELINE))
-    print(f"  Standing epochs kept: {len(stand_epochs)}")
-
-    stand_tfr_list = []
-
-    for epoch in stand_epochs.get_data():   # epoch: (n_ch, n_time)
-        tfr = mne.time_frequency.tfr_array_morlet(
-            epoch[np.newaxis],
-            sfreq=stand_sfreq,
-            freqs=FREQS,
-            n_cycles=N_CYCLES,
-            output="power",
-            zero_mean=True,
-            verbose=False,
-        )[0]   # (n_ch, n_freqs, n_time)
-
-        crop = int(EDGE_CROP * tfr.shape[-1])
-        if crop > 0:
-            tfr = tfr[..., crop:-crop]
-
-        stand_tfr_list.append(tfr)
-
-    stand_tfr_stack = np.stack(stand_tfr_list)   # (n_kept, n_ch, n_freqs, n_time_cropped)
-    baseline_power  = stand_tfr_stack.mean(axis=(0, 3))   # (n_ch, n_freqs)
-
-    print(f"  Baseline shape: {baseline_power.shape}  "
-          f"range=[{baseline_power.min():.4e}, {baseline_power.max():.4e}]")
-
-    # Channel index map: gait segments (ch_names_ref order) -> standing (stand_ch_names order)
-    ref_idx = [ch_names_ref.index(ch) for ch in stand_ch_names if ch in ch_names_ref]
-    if len(ref_idx) < len(stand_ch_names):
-        dropped = [ch for ch in stand_ch_names if ch not in ch_names_ref]
-        print(f"  WARNING: {len(dropped)} standing channels not in reference: {dropped}")
-
-    # Per cycle TFR
-
-    tfr_cycles = []
-    n_rej = 0
-
-    for seg in gait_segments:   # seg: (n_ch_ref, n_samp_i)
-
-        seg_ch = seg[ref_idx]   # select and reorder to match standing channels
-
-        if np.abs(seg_ch).max() > AMP_THRESH_CYCLE:
-            n_rej += 1
+        if not seg_path.exists():
+            print(f"  Gait segments not found: {seg_path.name} -- skipping.")
             continue
 
-        power = mne.time_frequency.tfr_array_morlet(
-            seg_ch[np.newaxis],
-            sfreq=gait_sfreq,
-            freqs=FREQS,
-            n_cycles=N_CYCLES,
-            output="power",
-            zero_mean=True,
+        gait_segments = np.load(seg_path, allow_pickle=True)
+        gait_sfreq    = float(np.load(sfreq_path))
+
+        print(f"  Gait segments: {len(gait_segments)}  sfreq={gait_sfreq:.0f} Hz")
+
+        # Standing baseline -- extract from ICA-cleaned concatenated raw using annotation
+
+        stand_annot = [a for a in concat_raw.annotations if a["description"] == "STAND"]
+        if len(stand_annot) != 1:
+            raise RuntimeError(f"Expected 1 STAND annotation, found {len(stand_annot)}")
+
+        stand_start = float(stand_annot[0]["onset"])
+        stand_stop  = float(stand_annot[0]["onset"]) + float(stand_annot[0]["duration"])
+        stand_stop  = min(stand_stop, concat_raw.times[-1])   # clamp to recording end
+        raw_stand   = concat_raw.copy().crop(stand_start, stand_stop)
+
+        # Trim last 2 s to remove boundary artifact from crop operation
+        stand_tmax = raw_stand.times[-1] - 2.0
+        if stand_tmax <= 0:
+            raise RuntimeError(
+                f"sub-{subject}: standing segment too short after trimming "
+                f"({raw_stand.times[-1]:.1f} s)"
+            )
+        raw_stand = raw_stand.crop(tmax=stand_tmax)
+
+        stand_sfreq    = raw_stand.info["sfreq"]
+        stand_ch_names = list(raw_stand.ch_names)
+
+        events = mne.make_fixed_length_events(raw_stand, duration=2.0)
+        stand_epochs = mne.Epochs(
+            raw_stand, events,
+            tmin=0, tmax=2.0,
+            baseline=None,
+            preload=True,
+            reject_by_annotation=False,
             verbose=False,
-        )[0]   # (n_ch, n_freqs, n_samp_i)
+        )
+        stand_epochs.drop_bad(reject=dict(eeg=AMP_THRESH_BASELINE))
+        print(f"  Standing epochs kept: {len(stand_epochs)}")
 
-        crop = int(EDGE_CROP * power.shape[-1])
-        if crop > 0:
-            power = power[..., crop:-crop]
+        stand_tfr_list = []
 
-        # Resample power time axis to N_POINTS using linear interpolation
-        n_t   = power.shape[-1]
-        x_old = np.linspace(0, 1, n_t)
-        x_new = np.linspace(0, 1, N_POINTS)
-        resampled = np.stack([
-            np.stack([np.interp(x_new, x_old, power[ch, f])
-                      for f in range(power.shape[1])])
-            for ch in range(power.shape[0])
-        ])   # (n_ch, n_freqs, N_POINTS)
+        for epoch in stand_epochs.get_data():   # epoch: (n_ch, n_time)
+            if np.max(np.abs(epoch)) > AMP_THRESH_BASELINE:
+                continue
+            tfr = mne.time_frequency.tfr_array_morlet(
+                epoch[np.newaxis],
+                sfreq=stand_sfreq,
+                freqs=FREQS,
+                n_cycles=N_CYCLES,
+                output="power",
+                zero_mean=True,
+                verbose=False,
+            )[0]   # (n_ch, n_freqs, n_time)
 
-        tfr_cycles.append(resampled)
+            crop = int(EDGE_CROP * tfr.shape[-1])
+            if crop > 0:
+                tfr = tfr[..., crop:-crop]
 
-    print(f"  Gait cycles rejected by amplitude: {n_rej}")
-    print(f"  Gait cycles accepted             : {len(tfr_cycles)}")
+            stand_tfr_list.append(tfr)
 
-    if len(tfr_cycles) == 0:
-        print("  No gait cycles survived -- skipping subject.")
+        print(f"  Standing epochs accepted for baseline: {len(stand_tfr_list)} / "
+              f"{len(stand_epochs)}")
+
+        if len(stand_tfr_list) == 0:
+            raise RuntimeError(
+                f"sub-{subject}: all standing epochs rejected -- "
+                f"cannot compute baseline"
+            )
+
+        stand_tfr_stack = np.stack(stand_tfr_list)   # (n_kept, n_ch, n_freqs, n_time_cropped)
+        baseline_power  = stand_tfr_stack.mean(axis=(0, 3))   # (n_ch, n_freqs)
+        assert baseline_power.shape == (stand_tfr_stack.shape[1], stand_tfr_stack.shape[2]), \
+            f"Baseline shape {baseline_power.shape} does not match expected (n_ch, n_freqs)"
+
+        print(f"  Baseline shape: {baseline_power.shape}  "
+              f"range=[{baseline_power.min():.4e}, {baseline_power.max():.4e}]")
+
+        # Gait segments and standing share the same source file; channels are identical
+        ref_idx = [ch_names_ref.index(ch) for ch in stand_ch_names if ch in ch_names_ref]
+
+        # Per cycle TFR
+
+        tfr_cycles = []
+        n_rej = 0
+
+        for seg in gait_segments:   # seg: (n_ch_ref, n_samp_i)
+
+            seg_ch = seg[ref_idx]   # select and reorder to match standing channels
+
+            if np.abs(seg_ch).max() > AMP_THRESH_CYCLE:
+                n_rej += 1
+                continue
+
+            power = mne.time_frequency.tfr_array_morlet(
+                seg_ch[np.newaxis],
+                sfreq=gait_sfreq,
+                freqs=FREQS,
+                n_cycles=N_CYCLES,
+                output="power",
+                zero_mean=True,
+                verbose=False,
+            )[0]   # (n_ch, n_freqs, n_samp_i)
+
+            crop = int(EDGE_CROP * power.shape[-1])
+            if crop > 0:
+                power = power[..., crop:-crop]
+
+            # Resample power time axis to N_POINTS using linear interpolation
+            n_t   = power.shape[-1]
+            x_old = np.linspace(0, 1, n_t)
+            x_new = np.linspace(0, 1, N_POINTS)
+            resampled = np.stack([
+                np.stack([np.interp(x_new, x_old, power[ch, f])
+                          for f in range(power.shape[1])])
+                for ch in range(power.shape[0])
+            ])   # (n_ch, n_freqs, N_POINTS)
+
+            tfr_cycles.append(resampled)
+
+        print(f"  Gait cycles rejected by amplitude: {n_rej}")
+        print(f"  Gait cycles accepted             : {len(tfr_cycles)}")
+
+        if len(tfr_cycles) == 0:
+            print("  No gait cycles survived -- skipping subject.")
+            continue
+
+        # ERSP
+
+        tfr_stack = np.stack(tfr_cycles)   # (n_cycles, n_ch, n_freqs, N_POINTS)
+
+        # Per-cycle log ratio to standing baseline, then average across cycles.
+        # This formulation treats each cycle as an independent observation.
+        # Averaging after log conversion avoids upweighting high-power cycles.
+        # Makeig et al. 1993 Electroencephalogr Clin Neurophysiol;
+        # Delorme & Makeig 2004 J Neurosci Methods
+        ersp_per_cycle = 10 * np.log10(
+            tfr_stack / baseline_power[np.newaxis, :, :, np.newaxis]
+        )   # (n_cycles, n_ch, n_freqs, N_POINTS)
+
+        ersp_avg = ersp_per_cycle.mean(axis=0)   # (n_ch, n_freqs, N_POINTS)
+
+        n_nan = np.sum(np.isnan(ersp_avg))
+        print(f"\n  ERSP shape : {ersp_avg.shape}")
+        print(f"  NaN count  : {n_nan}")
+        print(f"  Range      : {ersp_avg.min():.2f} / {ersp_avg.max():.2f} dB")
+
+        ROI_CHANNELS = ["Cz", "C3", "C4", "FC1", "FC2", "FCz", "CP1", "CP2", "CPz"]
+        for ch in ROI_CHANNELS:
+            if ch in stand_ch_names:
+                i = stand_ch_names.index(ch)
+                print(f"  {ch:>8s}  mean={ersp_avg[i].mean():+.2f}  "
+                      f"min={ersp_avg[i].min():+.2f}  max={ersp_avg[i].max():+.2f} dB")
+            else:
+                print(f"  {ch:>8s}  NOT FOUND in channel list")
+
+        global_mean = ersp_avg.mean()
+        print(f"  Global ERSP mean : {global_mean:+.2f} dB")
+
+        # --- Phase ERSP (stance vs swing) ---
+
+        # Per-cycle stance/swing split based on RTO timing.
+        # For a right-foot cycle (RHS-to-RHS), stance ends at RTO.
+        # Split point is computed as fraction of cycle duration, then
+        # mapped to the 101-point normalized time axis.
+        # This respects intra-individual variability in stance/swing ratio
+        # rather than assuming a fixed 60/40 split.
+        # See: Kline et al. 2022 J Neurophysiol; Handford et al. 2022 Gait Posture
+        cycles_meta = pd.read_csv(
+            GAITEPOCH_DIR / f"sub-{subject}_cycles_kept.tsv", sep="\t"
+        )
+        rto_fracs = (
+            (cycles_meta["rto_s"] - cycles_meta["rhs_start_s"]) /
+            (cycles_meta["rhs_end_s"] - cycles_meta["rhs_start_s"])
+        ).values  # shape: (n_cycles,)
+
+        # Clip to valid range -- rto_frac should be in (0.3, 0.8) for normal gait
+        rto_fracs = np.clip(rto_fracs, 0.3, 0.8)
+
+        # Convert fraction to index in 101-point axis
+        rto_indices = np.round(rto_fracs * (N_POINTS - 1)).astype(int)  # per cycle
+
+        print(f"  RTO fraction: mean={rto_fracs.mean():.3f}  "
+              f"std={rto_fracs.std():.3f}  "
+              f"range=[{rto_fracs.min():.3f}, {rto_fracs.max():.3f}]")
+
+        # Guard: cycles_kept.tsv must match ersp_per_cycle cycle count.
+        # Both ana04 and ana05 apply AMP_THRESH=350e-6 to the same segments,
+        # so counts should always match. Raise early if they diverge.
+        if len(cycles_meta) != ersp_per_cycle.shape[0]:
+            raise RuntimeError(
+                f"cycles_kept.tsv has {len(cycles_meta)} rows but ersp_per_cycle has "
+                f"{ersp_per_cycle.shape[0]} cycles -- amplitude rejection mismatch."
+            )
+
+        # For each cycle, average ERSP over stance samples (0 to rto_idx)
+        # and swing samples (rto_idx to N_POINTS).
+        # Average across cycles after phase separation.
+        # Shape of each: (n_ch, n_freqs)
+        stance_ersp_per_cycle = np.stack([
+            ersp_per_cycle[k, :, :, :rto_indices[k]].mean(axis=-1)
+            for k in range(len(rto_indices))
+        ])  # (n_cycles, n_ch, n_freqs)
+
+        swing_ersp_per_cycle = np.stack([
+            ersp_per_cycle[k, :, :, rto_indices[k]:].mean(axis=-1)
+            for k in range(len(rto_indices))
+        ])  # (n_cycles, n_ch, n_freqs)
+
+        ersp_stance = stance_ersp_per_cycle.mean(axis=0)  # (n_ch, n_freqs)
+        ersp_swing  = swing_ersp_per_cycle.mean(axis=0)   # (n_ch, n_freqs)
+
+        print(f"  Stance ERSP (sensorimotor mean): "
+              f"{ersp_stance[[stand_ch_names.index(c) for c in ['Cz','C3','C4'] if c in stand_ch_names]].mean():+.2f} dB")
+        print(f"  Swing  ERSP (sensorimotor mean): "
+              f"{ersp_swing[[stand_ch_names.index(c) for c in ['Cz','C3','C4'] if c in stand_ch_names]].mean():+.2f} dB")
+
+        np.save(ERSP_DIR / f"sub-{subject}_ersp_stance.npy", ersp_stance)
+        np.save(ERSP_DIR / f"sub-{subject}_ersp_swing.npy",  ersp_swing)
+        print(f"  Saved -> sub-{subject}_ersp_stance.npy  shape={ersp_stance.shape}")
+        print(f"  Saved -> sub-{subject}_ersp_swing.npy   shape={ersp_swing.shape}")
+
+        pd.DataFrame({
+            "rto_frac": rto_fracs,
+            "rto_idx":  rto_indices
+        }).to_csv(ERSP_DIR / f"sub-{subject}_rto_fracs.csv", index=False)
+
+        out = ERSP_DIR / f"sub-{subject}_ersp_beta.npy"
+        np.save(out, ersp_avg)
+        print(f"\n  Saved -> {out.name}")
+
+        # --- QC: ERSP ---
+        n_nan         = int(np.isnan(ersp_avg).sum())
+        ersp_range    = float(ersp_avg.max() - ersp_avg.min())
+        roi_channels  = ["Cz", "C3", "C4", "FC1", "FC2", "FCz", "CP1", "CP2"]
+        roi_idx       = [stand_ch_names.index(c) for c in roi_channels if c in stand_ch_names]
+        roi_mean      = float(ersp_avg[roi_idx].mean()) if roi_idx else float("nan")
+        n_cycles_used = len(tfr_cycles)
+
+        if n_nan > 0 or n_cycles_used < 20:
+            ersp_flag = "fail"
+        elif n_cycles_used < 50 or ersp_range < 1.0:
+            ersp_flag = "warn"
+        else:
+            ersp_flag = "pass"
+
+        # Baseline sanity check: mean beta power across channels should be
+        # within physiological range for preprocessed EEG (1e-13 to 1e-9 V^2).
+        # Values outside this range indicate a corrupted baseline.
+        baseline_mean = float(baseline_power.mean())
+        baseline_ok   = 1e-13 < baseline_mean < 1e-9
+        if not baseline_ok:
+            print(f"  [WARN] sub-{subject}: baseline mean {baseline_mean:.3e} "
+                  f"outside physiological range [1e-13, 1e-9] V^2")
+            ersp_flag = "warn"
+
+        log_qc(
+            qc_dir  = QC_DIR,
+            subject = subject,
+            stage   = "ersp",
+            flag    = ersp_flag,
+            metrics = {
+                "n_cycles_used":   n_cycles_used,
+                "n_nan":           n_nan,
+                "ersp_range_db":   round(ersp_range, 2),
+                "roi_mean_db":     round(roi_mean, 2) if roi_idx else None,
+                "stance_roi_db":   round(float(ersp_stance[roi_idx].mean()), 2) if roi_idx else None,
+                "swing_roi_db":    round(float(ersp_swing[roi_idx].mean()),  2) if roi_idx else None,
+                "baseline_mean_v2": float(round(baseline_mean, 20)),
+                "baseline_ok":     baseline_ok,
+            },
+        )
+        print(f"  QC ersp: {ersp_flag}  "
+              f"cycles={n_cycles_used}  nan={n_nan}  "
+              f"range={ersp_range:.2f}dB  roi_mean={roi_mean:.2f}dB")
+
+    except FileNotFoundError as e:
+        print(f"\n  [SKIP] sub-{subject}: file not found -- {e}")
+        continue
+    except Exception as e:
+        print(f"\n  [ERROR] sub-{subject}: unexpected error -- {e}")
+        import traceback
+        traceback.print_exc()
         continue
 
-    # ERSP
-
-    tfr_stack = np.stack(tfr_cycles)   # (n_cycles, n_ch, n_freqs, N_POINTS)
-
-    # Per-cycle log ratio to standing baseline, then average across cycles.
-    # This formulation treats each cycle as an independent observation.
-    # Averaging after log conversion avoids upweighting high-power cycles.
-    # Makeig et al. 1993 Electroencephalogr Clin Neurophysiol;
-    # Delorme & Makeig 2004 J Neurosci Methods
-    ersp_per_cycle = 10 * np.log10(
-        tfr_stack / baseline_power[np.newaxis, :, :, np.newaxis]
-    )   # (n_cycles, n_ch, n_freqs, N_POINTS)
-
-    ersp_avg = ersp_per_cycle.mean(axis=0)   # (n_ch, n_freqs, N_POINTS)
-
-    n_nan = np.sum(np.isnan(ersp_avg))
-    print(f"\n  ERSP shape : {ersp_avg.shape}")
-    print(f"  NaN count  : {n_nan}")
-    print(f"  Range      : {ersp_avg.min():.2f} / {ersp_avg.max():.2f} dB")
-
-    ROI_CHANNELS = ["Cz", "C3", "C4", "FC1", "FC2", "FCz", "CP1", "CP2", "CPz"]
-    for ch in ROI_CHANNELS:
-        if ch in stand_ch_names:
-            i = stand_ch_names.index(ch)
-            print(f"  {ch:>8s}  mean={ersp_avg[i].mean():+.2f}  "
-                  f"min={ersp_avg[i].min():+.2f}  max={ersp_avg[i].max():+.2f} dB")
-        else:
-            print(f"  {ch:>8s}  NOT FOUND in channel list")
-
-    global_mean = ersp_avg.mean()
-    print(f"  Global ERSP mean : {global_mean:+.2f} dB")
- 
-    out = ERSP_DIR / f"sub-{subject}_ersp_beta.npy"
-    np.save(out, ersp_avg)
-    print(f"\n  Saved -> {out.name}")
-
 print("\nDone")
+print(f"\nDone. Processed {len(SUBJECTS)} subject(s): {SUBJECTS}")

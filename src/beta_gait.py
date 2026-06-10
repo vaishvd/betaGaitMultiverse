@@ -1,11 +1,11 @@
 """
-utils/beta_gait.py
-==================
-Utility functions for beta-band gait-cycle ERSP analysis.
+Beta-band gait cycle analysis utilities.
 
-Operates exclusively on ERSP arrays already produced by
-ana05_gaitcycles2tfr.py.  No CSD transform is applied here — input data
-is assumed to be ICA-cleaned only (no CSD influence).
+Functions in this module implement the canonical ERSP computation and
+phase analysis logic. Currently the pipeline scripts (ana05, ana06)
+implement equivalent logic inline. These functions are retained as the
+reference implementation and will replace the inline code in a future
+refactor.
 """
 
 from pathlib import Path
@@ -313,4 +313,55 @@ def plot_beta_gait_heatmap(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved → {out_path}")
+    print(f"  Saved -> {out_path}")
+
+
+# --- 6. compute_phase_ersp ---------------------------------------------------
+
+def compute_phase_ersp(
+    ersp_per_cycle: np.ndarray,
+    rto_fracs: np.ndarray,
+    n_points: int = _N_POINTS,
+) -> tuple:
+    """
+    Compute stance and swing phase mean ERSP from per-cycle ERSP array.
+
+    Parameters
+    ----------
+    ersp_per_cycle : np.ndarray, shape (n_cycles, n_ch, n_freqs, n_points)
+        Per-cycle ERSP values (log ratio to baseline per cycle).
+    rto_fracs : np.ndarray, shape (n_cycles,)
+        Per-cycle RTO fraction (stance end as proportion of cycle duration).
+        Computed as (rto_s - rhs_start_s) / (rhs_end_s - rhs_start_s).
+        Should be in range [0.3, 0.8] for normal gait.
+    n_points : int
+        Number of time-normalised points in the gait cycle axis.
+
+    Returns
+    -------
+    ersp_stance : np.ndarray, shape (n_ch, n_freqs)
+        Mean ERSP over stance phase, averaged across cycles.
+    ersp_swing : np.ndarray, shape (n_ch, n_freqs)
+        Mean ERSP over swing phase, averaged across cycles.
+
+    Notes
+    -----
+    Phase boundaries are computed per cycle from RTO timing rather than
+    using a fixed 60/40 split, respecting intra-individual variability.
+    See Kline et al. 2022 J Neurophysiol; Handford et al. 2022 Gait Posture.
+    """
+    rto_indices = np.round(
+        np.clip(rto_fracs, 0.3, 0.8) * (n_points - 1)
+    ).astype(int)
+
+    stance = np.stack([
+        ersp_per_cycle[k, :, :, :rto_indices[k]].mean(axis=-1)
+        for k in range(len(rto_indices))
+    ]).mean(axis=0)
+
+    swing = np.stack([
+        ersp_per_cycle[k, :, :, rto_indices[k]:].mean(axis=-1)
+        for k in range(len(rto_indices))
+    ]).mean(axis=0)
+
+    return stance, swing
