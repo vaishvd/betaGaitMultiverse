@@ -1,0 +1,21 @@
+subject	stage	flag	n_cycles_used	n_nan	ersp_range_db	roi_mean_db	stance_roi_db	swing_roi_db	baseline_mean_v2	baseline_ok	n_extracted	n_total	reject_frac	mean_seg_len	n_cycles	mean_dur_s	std_dur_s	cv_dur	n_total_comps	n_brain_comps	n_excl_comps	brain_frac	concat_dur_s	n_bad_channels	n_orig_epochs	n_clean_epochs	n_ica_comps
+S1	gait_events	pass													302.0	0.992	0.014	0.014									
+S2	gait_events	pass													279.0	1.072	0.016	0.015									
+S3	gait_events	pass													283.0	1.06	0.014	0.014									
+S4	gait_events	pass													296.0	1.011	0.012	0.011									
+S1	preprocessing	pass																					483.0	0.0	241.0	83.0	37.0
+S2	preprocessing	warn																					488.7	1.0	244.0	20.0	22.0
+S3	preprocessing	pass																					485.9	1.0	242.0	70.0	33.0
+S4	preprocessing	pass																					483.1	2.0	241.0	157.0	38.0
+S1	ica	pass																	37.0	12.0	25.0	0.324					
+S2	ica	pass																	22.0	5.0	17.0	0.227					
+S3	ica	pass																	33.0	17.0	16.0	0.515					
+S4	ica	pass																	38.0	9.0	29.0	0.237					
+S1	gait_epochs	pass									302.0	302.0	0.0	248.0													
+S2	gait_epochs	pass									279.0	279.0	0.0	267.9													
+S3	gait_epochs	pass									283.0	283.0	0.0	264.9													
+S4	gait_epochs	pass									296.0	296.0	0.0	252.8													
+S1	ersp	pass	302.0	0.0	19.96	0.09	0.52	-0.52	6.209880888e-11	True																	
+S2	ersp	pass	279.0	0.0	13.64	-2.06	-2.12	-1.97	8.023490195e-11	True																	
+S3	ersp	pass	283.0	0.0	22.43	-3.63	-3.58	-3.7	7.395177971e-11	True																	
+S4	ersp	pass	296.0	0.0	17.43	-2.7	-2.7	-2.7	4.250736836e-11	True																	
