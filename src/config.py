@@ -6,23 +6,44 @@ from pathlib import Path
 DATASET  = "stepup"   # active dataset key
 SUBJECTS = ["S1", "S2", "S3", "S4"]     # subjects to process in batch
 
+# Subjects for multiverse analysis.
+# S2 excluded: insufficient clean epochs under low high-pass settings
+# (0.1 Hz), confirmed by Universe 1 run (15/242 epochs after AutoReject).
+MULTIVERSE_SUBJECTS = ["S1", "S3", "S4"]
+
+# --- Canonical pipeline ASR settings ---
+# ASR (Artifact Subspace Reconstruction) is applied after bad-channel
+# interpolation and before average reference.
+# Set USE_ASR = True to enable in the canonical pipeline.
+# Default is False: ASR attenuated the stance/swing beta difference
+# in the multiverse analysis (group t: 1.80 → 0.60), so the canonical
+# pipeline uses the more conservative non-ASR result.
+# See: Mullen et al. 2015 IEEE TBME; Gorjan et al. 2022 J Neural Eng
+USE_ASR    = False
+ASR_CUTOFF = 30.0   # SD threshold; 20-30 recommended for walking EEG
+
+MULTIVERSE_NAME = "beta_gait_multiverse"
+
 
 def define_dir(root, *names):
     """Creates a directory and ensures it exists."""
     path = root
     for name in names:
-        path = path / name 
+        path = path / name
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 # Get the root directory of the repository (parent of 'src')
 DIR_PROJ = Path(__file__).resolve().parents[1]
 
-# Define paths for data directories 
+# Define paths for data directories
 DIR_DATASETS = define_dir(DIR_PROJ, "datasets")
 DIR_RESULTS  = define_dir(DIR_PROJ, "results")
-DIR_PLOTS    = define_dir(DIR_RESULTS, "plots")
-DIR_QC       = define_dir(DIR_RESULTS, "qc")
+DIR_PLOTS = define_dir(DIR_RESULTS, "pipeline", "plots")
+DIR_QC    = define_dir(DIR_RESULTS, "pipeline", "qc")
+DIR_MULTIVERSE          = define_dir(DIR_RESULTS, "multiverse")
+DIR_MULTIVERSE_OUTPUTS  = define_dir(DIR_RESULTS, "multiverse", "outputs")
+DIR_MULTIVERSE_BRANCHES = define_dir(DIR_RESULTS, "multiverse", "branches")
 
 # Dataset-specific directories will be defined in the DATASETS dict below, which allows for flexible handling of multiple datasets with different structures
 DATASETS = {

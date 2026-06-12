@@ -32,10 +32,11 @@ import numpy as np
 from autoreject import AutoReject
 
 from src.paths import get_dataset_dirs
-from src.config import DATASET, SUBJECTS
+from src.config import DATASET, SUBJECTS, USE_ASR, ASR_CUTOFF
 from src.preprocessing import drop_invalid_channels, save_epochs, drop_invalid_eeg_channels
 from src.ica_utils import run_ica, save_ica_component_plots
 from src.qc import log_qc
+from src.nodes.asr_node import apply_asr_node
 
 TASK_STAND = "STAND"
 TASK_WALK  = "CS"
@@ -145,6 +146,34 @@ for subject in SUBJECTS:
         if len(bads) > 0:
             raw_concat.interpolate_bads(reset_bads=True)
 
+        # --- ASR node (controlled by USE_ASR in src/config.py) ---
+        # Fitted on the standing calibration segment only, not the full
+        # concatenated recording. This ensures the clean covariance matrix
+        # is estimated from artifact-free resting data.
+        # Mullen et al. 2015 IEEE TBME; Gorjan et al. 2022 J Neural Eng
+        if USE_ASR:
+            stand_ann = [
+                a for a in raw_concat.annotations
+                if a["description"] == "STAND"
+            ][0]
+            calib = raw_concat.copy().crop(
+                stand_ann["onset"],
+                min(
+                    stand_ann["onset"] + stand_ann["duration"],
+                    raw_concat.times[-1]
+                )
+            )
+            calib = calib.crop(tmax=calib.times[-1] - 2.0)
+            raw_concat = apply_asr_node(
+                raw_concat,
+                apply=True,
+                calib_raw=calib,
+                cutoff=ASR_CUTOFF,
+            )
+            print(f"  ASR applied (cutoff={ASR_CUTOFF})")
+        else:
+            print(f"  ASR skipped (USE_ASR=False in config)")
+
         raw_concat.set_eeg_reference("average", projection=False)
 
         # Save preprocessed concatenated raw
@@ -229,6 +258,8 @@ for subject in SUBJECTS:
                 "n_orig_epochs":  n_orig_epochs,
                 "n_clean_epochs": n_clean_epochs,
                 "n_ica_comps":    n_ica_comps,
+                "use_asr":        bool(USE_ASR),
+                "asr_cutoff":     float(ASR_CUTOFF) if USE_ASR else None,
             },
         )
         print(f"  QC preprocessing: {prep_flag}  "
