@@ -1,13 +1,46 @@
+# Python
 .venv/
-datasets/
-old scripts/
 __pycache__/
-*.fdt
+*.pyc
+*.pyo
+
+# Raw and processed data — too large for git
+datasets/
+
+# Intermediate pipeline outputs — regenerable
+datasets/stepupAms/d02_prep/
+datasets/stepupAms/d03_clean/
+datasets/stepupAms/d04_gaitepochs/
+datasets/stepupAms/d05_ersp/
+datasets/stepupAms/d00_qc/
+
+# Large binary file types 
+*.fif
+*.npy
+*.pkl
+*.eeg
 *.set
+*.fdt
+*.mat
 
-#Ignore play notebook
+# Multiverse intermediates — regenerable
+results/multiverse/comet/
+!results/multiverse/comet/beta_gait_multiverse/results/*.png
+results/multiverse/branches/
+
+# COMET per-universe scripts — regenerable via --create
+# (universe_N.py files inside comet/ are already covered above)
+
+# Keep final outputs even if they match binary patterns above
+!results/multiverse/outputs/multiverse_results.pkl
+!results/multiverse/outputs/*.tsv
+!results/multiverse/outputs/*.png
+!results/multiverse/outputs/*.pdf
+!results/pipeline/plots/*.png
+!results/pipeline/qc/*.tsv
+
+# Legacy
+old scripts/
 initialanalysis.ipynb
-./initialanalysis.ipynb
-*/initialanalysis.ipynb
-
 uv.lock
+possibleDatasets.xlsx
