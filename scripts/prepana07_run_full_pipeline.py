@@ -124,7 +124,3 @@ def main():
     failed = [r for r in results if not r[2]]
     if failed:
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
