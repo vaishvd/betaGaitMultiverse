@@ -38,6 +38,7 @@ DIR_PROJ = Path(__file__).resolve().parents[1]
 
 # Define paths for data directories
 DIR_DATASETS = define_dir(DIR_PROJ, "datasets")
+DIR_SCRIPTS  = define_dir(DIR_PROJ, "scripts")
 DIR_RESULTS  = define_dir(DIR_PROJ, "results")
 DIR_PLOTS = define_dir(DIR_RESULTS, "pipeline", "plots")
 DIR_QC    = define_dir(DIR_RESULTS, "pipeline", "qc")

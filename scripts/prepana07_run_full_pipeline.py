@@ -4,14 +4,15 @@ Master pipeline runner for betaGaitMultiverse.
 Runs all six canonical pipeline stages in sequence for all subjects
 defined in src/config.SUBJECTS.
 
-Usage:
-    python scripts/run_pipeline.py           # run all stages
-    python scripts/run_pipeline.py --from 3  # start from stage 3
-    python scripts/run_pipeline.py --only 5  # run only stage 5
+Usage (interactive window):
+    Set MODE at the bottom of this file, then run the file.
+    MODE = "all"   — run all stages in sequence
+    MODE = "from"  — run from FROM_STAGE to end
+    MODE = "only"  — run one stage only (set ONLY_STAGE)
 
 Each stage script is run as a subprocess so that MNE's memory is fully
 released between stages. Stage failures are reported but do not stop
-the remaining stages unless --strict is passed.
+the remaining stages unless STRICT = True.
 
 Stages:
     1  prepana01_prep_gaitevents.py    gait event detection from motion capture
@@ -22,17 +23,12 @@ Stages:
     6  prepana06_plotbetagait.py       group beta ERSP figure
 """
 
-import argparse
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-repo_root = Path(__file__).resolve().parents[1]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
-from src.config import SUBJECTS, DATASET
+from src.config import SUBJECTS, DATASET, DIR_SCRIPTS
 
 STAGES = [
     (1, "prepana01_prep_gaitevents.py",  "gait event detection"),
@@ -43,11 +39,8 @@ STAGES = [
     (6, "prepana06_plotbetagait.py",     "group ERSP figure"),
 ]
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
-
-
 def run_stage(stage_num, script_name, description, strict=False):
-    script = SCRIPTS_DIR / script_name
+    script = DIR_SCRIPTS / script_name
     if not script.exists():
         print(f"\n[ERROR] Stage {stage_num} script not found: {script}")
         if strict:
@@ -62,7 +55,7 @@ def run_stage(stage_num, script_name, description, strict=False):
     t0 = time.time()
     result = subprocess.run(
         [sys.executable, str(script)],
-        cwd=str(repo_root)
+        cwd=str(DIR_SCRIPTS.parent)
     )
     elapsed = time.time() - t0
 
@@ -77,41 +70,47 @@ def run_stage(stage_num, script_name, description, strict=False):
     return True
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Run the betaGaitMultiverse canonical pipeline"
-    )
-    parser.add_argument(
-        "--from", dest="from_stage", type=int, default=1,
-        help="Start from this stage number (default: 1)"
-    )
-    parser.add_argument(
-        "--only", type=int, default=None,
-        help="Run only this stage number"
-    )
-    parser.add_argument(
-        "--strict", action="store_true",
-        help="Stop on first stage failure"
-    )
-    args = parser.parse_args()
+# ---------------------------------------------------------------------------
+# Run — set MODE and options before executing in interactive window
+#
+#   "all"   : run all stages in sequence
+#   "from"  : run from FROM_STAGE to end
+#   "only"  : run one stage only
+# ---------------------------------------------------------------------------
+MODE        = "all"    # change this before running
+FROM_STAGE  = 1        # only used when MODE = "from"
+ONLY_STAGE  = 6        # only used when MODE = "only"
+STRICT      = False    # if True, stop on first stage failure
 
+if MODE == "all":
+    stages_to_run = STAGES
+
+elif MODE == "from":
+    stages_to_run = [s for s in STAGES if s[0] >= FROM_STAGE]
+    if not stages_to_run:
+        print(f"No stages with number >= {FROM_STAGE}")
+        stages_to_run = []
+
+elif MODE == "only":
+    stages_to_run = [s for s in STAGES if s[0] == ONLY_STAGE]
+    if not stages_to_run:
+        print(f"No stage with number {ONLY_STAGE}")
+        stages_to_run = []
+
+else:
+    print(f"Unknown MODE '{MODE}'. Choose: all / from / only")
+    stages_to_run = []
+
+if stages_to_run:
     print(f"\nbetaGaitMultiverse — canonical pipeline")
     print(f"Dataset  : {DATASET}")
     print(f"Subjects : {SUBJECTS}")
 
-    stages_to_run = STAGES
-    if args.only is not None:
-        stages_to_run = [s for s in STAGES if s[0] == args.only]
-        if not stages_to_run:
-            print(f"No stage with number {args.only}")
-            sys.exit(1)
-    else:
-        stages_to_run = [s for s in STAGES if s[0] >= args.from_stage]
+    results  = []
+    t_total  = time.time()
 
-    results = []
-    t_total = time.time()
     for stage_num, script_name, description in stages_to_run:
-        ok = run_stage(stage_num, script_name, description, args.strict)
+        ok = run_stage(stage_num, script_name, description, STRICT)
         results.append((stage_num, description, ok))
 
     print(f"\n{'='*60}")
@@ -123,4 +122,4 @@ def main():
 
     failed = [r for r in results if not r[2]]
     if failed:
-        sys.exit(1)
+        print(f"\n  {len(failed)} stage(s) failed.")

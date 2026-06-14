@@ -27,7 +27,7 @@ from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS, DIR_PLOTS, DIR_QC
 from src.qc import log_qc
 
-ROI_CHANNEL  = "Cz"
+ROI_CHANNEL  = ["Cz","C3","C4", "FCz", "FC3", "FC4"]  # central midline + nearby channels; adjust if missing
 FREQS        = np.arange(13, 31)
 ERSP_CLIM    = 4.0        # symmetric dB limit; adjust if group mean is clipped
 STANCE_COLOR = "#DDEEFF"  # light blue
@@ -53,12 +53,12 @@ for subject in SUBJECTS:
         raw_ref  = mne.io.read_raw_fif(clean_path, preload=False, verbose=False)
         ch_names = list(raw_ref.ch_names)
 
-        if ROI_CHANNEL not in ch_names:
-            print(f"  [WARN] sub-{subject}: {ROI_CHANNEL} not in channel list -- skipping.")
+        if not any(channel in ch_names for channel in ROI_CHANNEL):
+            print(f"  [WARN] sub-{subject}: None of {ROI_CHANNEL} in channel list -- skipping.")
             continue
 
-        roi_idx  = ch_names.index(ROI_CHANNEL)
-        ersp_roi = ersp[roi_idx]   # (n_freqs, 101)
+        roi_indices = [ch_names.index(channel) for channel in ROI_CHANNEL if channel in ch_names]
+        ersp_roi = np.mean(ersp[roi_indices], axis=0)  # (n_freqs, 101)
 
         dur      = cycles["rhs_end_s"].values - cycles["rhs_start_s"].values
         lto_pct  = (cycles["lto_s"].values  - cycles["rhs_start_s"].values) / dur * 100
@@ -189,7 +189,7 @@ ax_trace.axhline(0, color="black", linewidth=0.8,
 ax_trace.plot(
     gait_pct, beta_trace,
     color="#1f3d7a", linewidth=2.0,
-    zorder=2, label=f"{ROI_CHANNEL}  n={n_subjects}"
+    zorder=2, label=f"{', '.join(ROI_CHANNEL)}  n={n_subjects}"
 )
 ax_trace.set_xlabel("Gait cycle (%)", fontsize=10)
 ax_trace.set_ylabel("ERSP (dB)", fontsize=10)
