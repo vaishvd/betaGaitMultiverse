@@ -259,10 +259,9 @@ elif MODE == "results":
         import shutil
 
         copy_map = {
-            "specification":  "specification_curve.png",
+            "specification":   "specification_curve.png",
             "multiverse_plot": "multiverse_plot.png",
-            "multiverse_dag": "multiverse_dag.png",
-            "multiverse":     "multiverse_overview.png",
+            "multiverse_dag":  "multiverse_dag.png",
         }
 
         for prefix, dst_name in copy_map.items():
@@ -391,10 +390,9 @@ elif MODE == "all":
         import shutil
 
         copy_map = {
-            "specification":  "specification_curve.png",
+            "specification":   "specification_curve.png",
             "multiverse_plot": "multiverse_plot.png",
-            "multiverse_dag": "multiverse_dag.png",
-            "multiverse":     "multiverse_overview.png",
+            "multiverse_dag":  "multiverse_dag.png",
         }
 
         for prefix, dst_name in copy_map.items():
