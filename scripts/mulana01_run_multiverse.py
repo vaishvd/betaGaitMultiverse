@@ -2,6 +2,8 @@
 betaGaitMultiverse — multiverse analysis entry point.
 
 Defines all preprocessing decision nodes and runs the full multiverse.
+Forking paths are defined in src/multiverse.py, which is imported here. The
+analysis_template function defines the analysis to be run for each universe, and is imported by COMET's multiverse runner.
 
 Usage (interactive window):
     Set MODE at the bottom of this file, then run the file.
@@ -128,7 +130,7 @@ mverse = Multiverse(name=MULTIVERSE_NAME, path=str(MV_DIR))
 #   "results"  : load results and generate plots
 #   "all"      : create + run + results
 # ---------------------------------------------------------------------------
-MODE     = "results"   
+MODE     = "results"  # set this before running; options: create / run / universe / results / all 
 UNIVERSE = 1          # only used when MODE = "universe"
 
 if MODE == "create":
