@@ -598,16 +598,16 @@ gantt
     Tweaking pipelines          :b3, after b2, 15d
 
     section Neural Analysis
-    Beta power extraction               :c1, 2026-04-07, 30d
-    Time-frequency analysis (ERSP)      :c2, 2026-04-07, 30d
-    Gait-cycle normalization            :c3, 2026-04-07, 30d
+    Beta power extraction               :c1, 2026-04-07, 60d
+    Time-frequency analysis (ERSP)      :c2, 2026-04-07, 60d
+    Gait-cycle normalization            :c3, 2026-04-07, 60d
 
     section Multiverse Analysis
-    Define preprocessing parameters     :d1, 2026-03-11, 45d
-    Run multiverse pipelines            :d2, after d1, 35d
-    Compare preprocessing outcomes      :d3, after d2, 30d
+    Define preprocessing parameters     :d1, 2026-03-11, 105d
+    Run multiverse pipelines            :d2, 2026-06-08 , 25d
+    Compare preprocessing outcomes      :d3, after d2, 15d
 
     section Manuscript
-    Figures and statistical analysis    :e1, 2026-06-15, 14d
+    Figures and statistical analysis    :e1, 2026-07-01, 14d
     Writing manuscript                  :e2, after e1, 31d
 ```
