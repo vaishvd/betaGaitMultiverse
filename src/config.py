@@ -4,7 +4,10 @@ from pathlib import Path
 # Change DATASET to switch between "stepup" and "splitbelt".
 # SUBJECTS will be expanded to the full cohort before batch processing.
 DATASET  = "stepup"   # active dataset key
-SUBJECTS = ["S1", "S2", "S3", "S4"]     # subjects to process in batch
+SUBJECTS = [
+    "S1", "S2", "S3", "S4", "S7", "S9", "S10", "S11",
+    "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S20", "S21", "S23",
+]  # full cohort
 
 # Subjects for multiverse analysis.
 # S2 excluded: insufficient clean epochs under low high-pass settings
