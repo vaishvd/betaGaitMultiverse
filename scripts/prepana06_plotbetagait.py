@@ -26,8 +26,11 @@ from pathlib import Path
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS, DIR_PLOTS, DIR_QC
 from src.qc import log_qc
+from src.spatial_filter import gaussian_roi_weights, apply_gaussian_roi
 
-ROI_CHANNEL  = ["Cz","C3","C4", "FCz", "FC3", "FC4"]  # central midline + nearby channels; adjust if missing
+# Gaussian spatial filter
+# Weights are loaded from the saved .npy file if available,
+# otherwise computed on the fly from channel positions.
 FREQS        = np.arange(13, 31)
 ERSP_CLIM    = 4.0        # symmetric dB limit; adjust if group mean is clipped
 STANCE_COLOR = "#DDEEFF"  # light blue
@@ -53,12 +56,16 @@ for subject in SUBJECTS:
         raw_ref  = mne.io.read_raw_fif(clean_path, preload=False, verbose=False)
         ch_names = list(raw_ref.ch_names)
 
-        if not any(channel in ch_names for channel in ROI_CHANNEL):
-            print(f"  [WARN] sub-{subject}: None of {ROI_CHANNEL} in channel list -- skipping.")
-            continue
-
-        roi_indices = [ch_names.index(channel) for channel in ROI_CHANNEL if channel in ch_names]
-        ersp_roi = np.mean(ersp[roi_indices], axis=0)  # (n_freqs, 101)
+        # Load or compute Gaussian weights
+        weights_path = ERSP_DIR / f"sub-{subject}_roi_weights.npy"
+        if weights_path.exists():
+            sub_weights = np.load(weights_path)
+        else:
+            sub_weights = gaussian_roi_weights(
+                raw_ref.info, center_ch="Cz", sigma_mm=40.0
+            )
+        # Apply weights to ERSP: (n_ch, n_freqs, 101) → (n_freqs, 101)
+        ersp_roi = apply_gaussian_roi(ersp, sub_weights)
 
         dur      = cycles["rhs_end_s"].values - cycles["rhs_start_s"].values
         lto_pct  = (cycles["lto_s"].values  - cycles["rhs_start_s"].values) / dur * 100
@@ -71,7 +78,7 @@ for subject in SUBJECTS:
         ersp_list.append(ersp_roi)
         events_list.append((mean_lto, mean_lhs, mean_rto))
 
-        print(f"  sub-{subject}: {ROI_CHANNEL} mean={ersp_roi.mean():+.2f} dB  "
+        print(f"  sub-{subject}: Gaussian ROI mean={ersp_roi.mean():+.2f} dB  "
               f"LTO={mean_lto:.1f}%  LHS={mean_lhs:.1f}%  RTO={mean_rto:.1f}%")
 
     except FileNotFoundError as e:
@@ -112,7 +119,7 @@ ax_trace = fig.add_subplot(gs[1], sharex=ax_heat)
 
 fig.suptitle(
     f"Beta ERSP over Gait Cycle — Group Average  "
-    f"(n={n_subjects}, {ROI_CHANNEL})",
+    f"(n={n_subjects}, Gaussian ROI, center=Cz, σ=40mm)",
     fontsize=12, fontweight="bold", y=0.98
 )
 
@@ -189,7 +196,7 @@ ax_trace.axhline(0, color="black", linewidth=0.8,
 ax_trace.plot(
     gait_pct, beta_trace,
     color="#1f3d7a", linewidth=2.0,
-    zorder=2, label=f"{', '.join(ROI_CHANNEL)}  n={n_subjects}"
+    zorder=2, label=f"Gaussian ROI (Cz, σ=40mm)  n={n_subjects}"
 )
 ax_trace.set_xlabel("Gait cycle (%)", fontsize=10)
 ax_trace.set_ylabel("ERSP (dB)", fontsize=10)
