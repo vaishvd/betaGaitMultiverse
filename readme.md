@@ -49,98 +49,42 @@ Motion capture provides gait events: right/left heel strike (RHS/LHS) and toe-of
 
 ## Repository Structure
 
+```
 betaGaitMultiverse/
-
 │
-
-├── scripts/                          # Executable scripts
-
-│   ├── main_script_eegpipeline.py    # Runs all 6 canonical pipeline stages
-
-│   ├── prepana01_prep_gaitevents.py  # Stage 1: gait event detection
-
-│   ├── prepana02_raw2ica.py          # Stage 2: preprocessing + ICA fitting
-
-│   ├── prepana03_ica2clean.py        # Stage 3: ICLabel + ICA application
-
-│   ├── prepana04_clean2gaitcycles.py # Stage 4: gait cycle extraction
-
-│   ├── prepana05_gaitcycles2tfr.py   # Stage 5: TFR + ERSP computation
-
-│   ├── prepana06_plotbetagait.py     # Stage 6: group beta ERSP figure
-
-│   ├── mulana01_run_multiverse.py    # Multiverse entry point (COMET)
-
-│   └── 00_download_openneuro_dataset.py  # Download raw data from OpenNeuro
-
+├── scripts/                               # Executable scripts
+│   ├── main_script_eegpipeline.py         # Runs all 6 canonical pipeline stages
+│   ├── prepana01_prep_gaitevents.py       # Stage 1: gait event detection
+│   ├── prepana02_raw2ica.py               # Stage 2: preprocessing + ICA fitting
+│   ├── prepana03_ica2clean.py             # Stage 3: ICLabel + ICA application
+│   ├── prepana04_clean2gaitcycles.py      # Stage 4: gait cycle extraction
+│   ├── prepana05_gaitcycles2tfr.py        # Stage 5: TFR + ERSP computation
+│   ├── prepana06_plotbetagait.py          # Stage 6: group beta ERSP figure
+│   ├── mulana01_run_multiverse.py         # Multiverse entry point (COMET)
+│   └── 00_download_openneuro_dataset.py   # Download raw data from OpenNeuro
 │
-
-├── src/                              # Shared library modules
-
-│   ├── config.py                     # Paths, subject list, pipeline constants
-
-│   ├── paths.py                      # Dataset directory resolver
-
-│   ├── pipeline_steps.py             # Core steps: load, preprocess, ICA
-
-│   ├── multiverse_pipeline.py        # Single-subject multiverse branch runner
-
-│   ├── preprocessing.py              # Channel dropping, bad channel detection
-
-│   ├── ica_utils.py                  # ICA fitting and ICLabel classification
-
-│   ├── gait_cycles.py                # Gait event detection and cycle extraction
-
-│   ├── spatial_filter.py             # Gaussian ROI weights (centred on Cz)
-
-│   ├── qc.py                         # QC logging utilities
-
+├── src/                                   # Shared library modules
+│   ├── config.py                          # Paths, subject list, pipeline constants
+│   ├── paths.py                           # Dataset directory resolver
+│   ├── pipeline_steps.py                  # Core steps: load, preprocess, ICA
+│   ├── multiverse_pipeline.py             # Single-subject multiverse branch runner
+│   ├── preprocessing.py                   # Channel dropping, bad channel detection
+│   ├── ica_utils.py                       # ICA fitting and ICLabel classification
+│   ├── gait_cycles.py                     # Gait event detection and cycle extraction
+│   ├── spatial_filter.py                  # Gaussian ROI weights (centred on Cz)
+│   ├── qc.py                              # QC logging utilities
 │   └── nodes/
-
-│       └── asr_node.py               # Artifact Subspace Reconstruction (ASR)
-
+│       └── asr_node.py                    # Artifact Subspace Reconstruction (ASR)
 │
-
 └── results/
-
-├── pipeline/
-
-│   ├── plots/                    # Group beta ERSP figures
-
-│   └── qc/                       # QC flags and summary tables
-
-└── multiverse/
-
-├── outputs/                  # Specification curve, multiverse plot
-
-
----
-
-## Data Structure
-
-The pipeline uses mobile EEG data stored in **BIDS format**.
-
-Example structure:
-
+    ├── pipeline/
+    │   ├── plots/                         # Group beta ERSP figures
+    │   └── qc/                            # QC flags and summary tables
+    └── multiverse/
+        ├── outputs/                       # Specification curve, multiverse plot
+        ├── branches/                      # Cached ICA per branch (gitignored)
+        └── comet/                         # COMET internal files (gitignored)
 ```
-data/d00_raw
-
-└── sub-S18
-    └── eeg
-        ├── sub-S18_task-task_eeg.set
-        ├── sub-S18_task-task_events.tsv
-        └── sub-S18_task-task_channels.tsv
-```
-
-Event markers include gait-related events such as:
-
-* RHS — Right heel strike
-* LHS — Left heel strike
-* RTO — Right toe off
-* LTO — Left toe off
-
-Additional experiment markers define task blocks (e.g., B1, B2, etc.).
-
 ---
 
 ## EEG Analysis Pipeline
@@ -309,7 +253,7 @@ uv pip install -e .
 Key dependencies: `mne`, `mne-icalabel`, `autoreject`, `comet-toolbox`, `numpy`, `pandas`, `matplotlib`, `scipy`.
 
 ---
-
+## Timeline
 
 ```mermaid
 gantt
