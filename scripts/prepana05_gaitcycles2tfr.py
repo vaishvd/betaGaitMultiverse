@@ -33,6 +33,7 @@ import mne
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS
 from src.qc import log_qc
+from src.spatial_filter import gaussian_roi_weights, apply_gaussian_roi, plot_weight_topography
 
 FREQS    = np.arange(13, 31, dtype=float)   # beta band 13-30 Hz
 N_CYCLES = FREQS / 2.0                      # frequency-dependent wavelet width
@@ -56,6 +57,7 @@ CLEAN_DIR     = dirs["clean"]
 GAITEPOCH_DIR = dirs["gaitepochs"]
 ERSP_DIR      = dirs["ersp"]
 QC_DIR        = dirs["qc"]
+ROI_TOPO_DIR  = dirs["roi_topo"]
 
 
 for subject in SUBJECTS:
@@ -224,17 +226,34 @@ for subject in SUBJECTS:
         print(f"  NaN count  : {n_nan}")
         print(f"  Range      : {ersp_avg.min():.2f} / {ersp_avg.max():.2f} dB")
 
-        ROI_CHANNELS = ["Cz", "C3", "C4", "FC1", "FC2", "FCz", "CP1", "CP2", "CPz"]
-        for ch in ROI_CHANNELS:
-            if ch in stand_ch_names:
-                i = stand_ch_names.index(ch)
-                print(f"  {ch:>8s}  mean={ersp_avg[i].mean():+.2f}  "
-                      f"min={ersp_avg[i].min():+.2f}  max={ersp_avg[i].max():+.2f} dB")
-            else:
-                print(f"  {ch:>8s}  NOT FOUND in channel list")
+        # --- Gaussian ROI weights ---
+        # Compute once per subject from the ICA-cleaned raw channel positions.
+        # Saved for reproducibility and topography plotting.
+        # Weights are used at analysis time in multiverse_pipeline.py and
+        # prepana06_plotbetagait.py — the full per-channel ERSP is preserved.
+        _info = concat_raw.info
+        try:
+            weights = gaussian_roi_weights(_info, center_ch="Cz", sigma_mm=40.0)
+            np.save(ERSP_DIR / f"sub-{subject}_roi_weights.npy", weights)
 
-        global_mean = ersp_avg.mean()
-        print(f"  Global ERSP mean : {global_mean:+.2f} dB")
+            plot_weight_topography(
+                weights, _info, subject,
+                out_path  = ROI_TOPO_DIR / f"sub-{subject}_roi_weights_topo.png",
+                center_ch = "Cz",
+                sigma_mm  = 40.0,
+            )
+            print(f"  ROI weights saved  max_ch={_info.ch_names[weights.argmax()]}  "
+                  f"max_w={weights.max():.4f}")
+        except Exception as e:
+            print(f"  [WARN] ROI weights failed: {e}")
+            weights = None
+
+        if weights is not None:
+            roi_mean_weighted = float(apply_gaussian_roi(ersp_avg, weights).mean())
+        else:
+            roi_mean_weighted = float("nan")
+        print(f"  Gaussian ROI mean: {roi_mean_weighted:+.2f} dB  "
+              f"(center=Cz, σ=40mm)")
 
         # --- Phase ERSP (stance vs swing) ---
 
@@ -311,9 +330,7 @@ for subject in SUBJECTS:
         # --- QC: ERSP ---
         n_nan         = int(np.isnan(ersp_avg).sum())
         ersp_range    = float(ersp_avg.max() - ersp_avg.min())
-        roi_channels  = ["Cz", "C3", "C4", "FC1", "FC2", "FCz", "CP1", "CP2"]
-        roi_idx       = [stand_ch_names.index(c) for c in roi_channels if c in stand_ch_names]
-        roi_mean      = float(ersp_avg[roi_idx].mean()) if roi_idx else float("nan")
+        roi_mean      = roi_mean_weighted
         n_cycles_used = len(tfr_cycles)
 
         if n_nan > 0 or n_cycles_used < 20:
@@ -342,9 +359,9 @@ for subject in SUBJECTS:
                 "n_cycles_used":   n_cycles_used,
                 "n_nan":           n_nan,
                 "ersp_range_db":   round(ersp_range, 2),
-                "roi_mean_db":     round(roi_mean, 2) if roi_idx else None,
-                "stance_roi_db":   round(float(ersp_stance[roi_idx].mean()), 2) if roi_idx else None,
-                "swing_roi_db":    round(float(ersp_swing[roi_idx].mean()),  2) if roi_idx else None,
+                "roi_mean_db":     round(roi_mean, 2) if not np.isnan(roi_mean) else None,
+                "stance_roi_db":   round(float(apply_gaussian_roi(ersp_stance, weights).mean()), 2) if weights is not None else None,
+                "swing_roi_db":    round(float(apply_gaussian_roi(ersp_swing,  weights).mean()), 2) if weights is not None else None,
                 "baseline_mean_v2": float(round(baseline_mean, 20)),
                 "baseline_ok":     baseline_ok,
             },
