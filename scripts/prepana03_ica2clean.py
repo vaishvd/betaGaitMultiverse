@@ -20,7 +20,7 @@ Output
 ------
 d03_clean/
     sub-{sub}_desc-icaClean_concat_raw.fif  ICA-cleaned concatenated raw
-    sub-{sub}_ica-clean.fif                 ICA with exclusions
+    sub-{sub}_clean-ica.fif                 ICA with exclusions
 """
 
 import mne
@@ -28,6 +28,7 @@ import numpy as np
 
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS
+from src.pipeline_steps import apply_ica
 from src.ica_utils import label_and_mark_ica
 from src.qc import log_qc
 
@@ -94,39 +95,17 @@ for subject in SUBJECTS:
             )
             continue
 
-        #  Drop channels without valid sensor positions
-        # get NaN positions and break the interpolation spline matrix.
-
-        no_pos = [
-            ch["ch_name"] for ch in raw.info["chs"]
-            if ch["kind"] == 2 and (                         # EEG channel
-                np.any(np.isnan(ch["loc"][:3])) or
-                np.allclose(ch["loc"][:3], 0)
-            )
-        ]
-
-        # Apply ICA to continuous raw
-        raw_clean = ica.apply(raw.copy())
-
-        if no_pos:
-            raw_clean.drop_channels(no_pos)
-
-        # Interpolate bad channels
-
-        if raw_clean.info["bads"]:
-            print(f"\n  Interpolating bad channels: {raw_clean.info['bads']}")
-            raw_clean.interpolate_bads(reset_bads=True)
+        # Apply ICA, drop no-position channels, interpolate bads
+        raw_clean = apply_ica(raw, ica, subject, iclean_path=None)
 
         # QC: verify no NaN introduced by ICA
-
         nan_out = np.mean(np.isnan(raw_clean.get_data()))
         if nan_out > 0:
             print("  ERROR: NaN in ICA output -- inspect component mixing matrix.")
             continue
 
-        #  Save ICA with exclusions so ana05 can apply same cleaning to baseline
-
-        ica_clean_out = CLEAN_DIR / f"sub-{subject}_ica-clean.fif"
+        # Save ICA with exclusions for downstream scripts
+        ica_clean_out = CLEAN_DIR / f"sub-{subject}_clean-ica.fif"
         ica.save(ica_clean_out, overwrite=True, verbose=False)
         print(f"  Saved ICA with exclusions -> {ica_clean_out.name}")
 
