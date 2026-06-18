@@ -33,7 +33,7 @@ import mne
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS
 from src.qc import log_qc
-from src.spatial_filter import gaussian_roi_weights, apply_gaussian_roi, plot_weight_topography
+from src.spatial_filter import linear_roi_weights, apply_linear_roi, plot_weight_topography
 
 FREQS    = np.arange(13, 31, dtype=float)   # beta band 13-30 Hz
 N_CYCLES = FREQS / 2.0                      # frequency-dependent wavelet width
@@ -226,21 +226,20 @@ for subject in SUBJECTS:
         print(f"  NaN count  : {n_nan}")
         print(f"  Range      : {ersp_avg.min():.2f} / {ersp_avg.max():.2f} dB")
 
-        # --- Gaussian ROI weights ---
+        # --- Linear ROI weights ---
         # Compute once per subject from the ICA-cleaned raw channel positions.
         # Saved for reproducibility and topography plotting.
         # Weights are used at analysis time in multiverse_pipeline.py and
         # prepana06_plotbetagait.py — the full per-channel ERSP is preserved.
         _info = concat_raw.info
         try:
-            weights = gaussian_roi_weights(_info, center_ch="Cz", sigma_mm=40.0)
+            weights = linear_roi_weights(_info, center_ch="Cz")
             np.save(ERSP_DIR / f"sub-{subject}_roi_weights.npy", weights)
 
             plot_weight_topography(
                 weights, _info, subject,
                 out_path  = ROI_TOPO_DIR / f"sub-{subject}_roi_weights_topo.png",
                 center_ch = "Cz",
-                sigma_mm  = 40.0,
             )
             print(f"  ROI weights saved  max_ch={_info.ch_names[weights.argmax()]}  "
                   f"max_w={weights.max():.4f}")
@@ -249,11 +248,11 @@ for subject in SUBJECTS:
             weights = None
 
         if weights is not None:
-            roi_mean_weighted = float(apply_gaussian_roi(ersp_avg, weights).mean())
+            roi_mean_weighted = float(apply_linear_roi(ersp_avg, weights).mean())
         else:
             roi_mean_weighted = float("nan")
-        print(f"  Gaussian ROI mean: {roi_mean_weighted:+.2f} dB  "
-              f"(center=Cz, σ=40mm)")
+        print(f"  Linear ROI mean: {roi_mean_weighted:+.2f} dB  "
+              f"(center=Cz)")
 
         # --- Phase ERSP (stance vs swing) ---
 
@@ -295,7 +294,7 @@ for subject in SUBJECTS:
         # and swing samples (rto_idx to N_POINTS).
         # Average across cycles after phase separation.
         # Shape of each: (n_ch, n_freqs)
-        stance_ersp_per_cycle = np.stack([
+        double_stance_ersp_per_cycle = np.stack([
             ersp_per_cycle[k, :, :, :rto_indices[k]].mean(axis=-1)
             for k in range(len(rto_indices))
         ])  # (n_cycles, n_ch, n_freqs)
@@ -305,18 +304,18 @@ for subject in SUBJECTS:
             for k in range(len(rto_indices))
         ])  # (n_cycles, n_ch, n_freqs)
 
-        ersp_stance = stance_ersp_per_cycle.mean(axis=0)  # (n_ch, n_freqs)
-        ersp_swing  = swing_ersp_per_cycle.mean(axis=0)   # (n_ch, n_freqs)
+        ersp_double_stance = double_stance_ersp_per_cycle.mean(axis=0)  # (n_ch, n_freqs)
+        ersp_swing         = swing_ersp_per_cycle.mean(axis=0)          # (n_ch, n_freqs)
 
-        print(f"  Stance ERSP (sensorimotor mean): "
-              f"{ersp_stance[[stand_ch_names.index(c) for c in ['Cz','C3','C4'] if c in stand_ch_names]].mean():+.2f} dB")
-        print(f"  Swing  ERSP (sensorimotor mean): "
+        print(f"  Double stance ERSP (sensorimotor mean): "
+              f"{ersp_double_stance[[stand_ch_names.index(c) for c in ['Cz','C3','C4'] if c in stand_ch_names]].mean():+.2f} dB")
+        print(f"  Swing         ERSP (sensorimotor mean): "
               f"{ersp_swing[[stand_ch_names.index(c) for c in ['Cz','C3','C4'] if c in stand_ch_names]].mean():+.2f} dB")
 
-        np.save(ERSP_DIR / f"sub-{subject}_ersp_stance.npy", ersp_stance)
-        np.save(ERSP_DIR / f"sub-{subject}_ersp_swing.npy",  ersp_swing)
-        print(f"  Saved -> sub-{subject}_ersp_stance.npy  shape={ersp_stance.shape}")
-        print(f"  Saved -> sub-{subject}_ersp_swing.npy   shape={ersp_swing.shape}")
+        np.save(ERSP_DIR / f"sub-{subject}_ersp_double_stance.npy", ersp_double_stance)
+        np.save(ERSP_DIR / f"sub-{subject}_ersp_swing.npy",         ersp_swing)
+        print(f"  Saved -> sub-{subject}_ersp_double_stance.npy  shape={ersp_double_stance.shape}")
+        print(f"  Saved -> sub-{subject}_ersp_swing.npy           shape={ersp_swing.shape}")
 
         pd.DataFrame({
             "rto_frac": rto_fracs,
@@ -360,8 +359,8 @@ for subject in SUBJECTS:
                 "n_nan":           n_nan,
                 "ersp_range_db":   round(ersp_range, 2),
                 "roi_mean_db":     round(roi_mean, 2) if not np.isnan(roi_mean) else None,
-                "stance_roi_db":   round(float(apply_gaussian_roi(ersp_stance, weights).mean()), 2) if weights is not None else None,
-                "swing_roi_db":    round(float(apply_gaussian_roi(ersp_swing,  weights).mean()), 2) if weights is not None else None,
+                "double_stance_roi_db": round(float(apply_linear_roi(ersp_double_stance, weights).mean()), 2) if weights is not None else None,
+                "swing_roi_db":         round(float(apply_linear_roi(ersp_swing,         weights).mean()), 2) if weights is not None else None,
                 "baseline_mean_v2": float(round(baseline_mean, 20)),
                 "baseline_ok":     baseline_ok,
             },
