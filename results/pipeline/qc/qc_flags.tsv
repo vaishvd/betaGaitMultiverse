@@ -1,5 +1,19 @@
 subject	ersp	gait_epochs	gait_events	ica	preprocessing
 S1	pass	pass	pass	pass	pass
-S2	pass	pass	pass	pass	warn
+S10	pass	pass	pass	warn	warn
+S11	pass	pass	pass	pass	pass
+S12	pass	pass	pass	warn	pass
+S13	pass	pass	pass	pass	pass
+S14	pass	pass	pass	pass	pass
+S15	pass	pass	pass	pass	pass
+S16	pass	pass	pass	pass	pass
+S17	pass	pass	pass	pass	pass
+S18	pass	pass	pass	pass	pass
+S2	pass	pass	pass	pass	pass
+S20	pass	pass	pass	pass	pass
+S21			pass		
+S23	pass	pass	pass	pass	pass
 S3	pass	pass	pass	pass	pass
 S4	pass	pass	pass	pass	pass
+S7	pass	pass	pass	pass	pass
+S9	pass	pass	pass	pass	pass

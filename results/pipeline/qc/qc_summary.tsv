@@ -1,21 +1,87 @@
-subject	stage	flag	n_cycles_used	n_nan	ersp_range_db	roi_mean_db	stance_roi_db	swing_roi_db	baseline_mean_v2	baseline_ok	n_extracted	n_total	reject_frac	mean_seg_len	n_cycles	mean_dur_s	std_dur_s	cv_dur	n_total_comps	n_brain_comps	n_excl_comps	brain_frac	concat_dur_s	n_bad_channels	n_orig_epochs	n_clean_epochs	n_ica_comps
-S1	gait_events	pass													302.0	0.992	0.014	0.014									
-S2	gait_events	pass													279.0	1.072	0.016	0.015									
-S3	gait_events	pass													283.0	1.06	0.014	0.014									
-S4	gait_events	pass													296.0	1.011	0.012	0.011									
-S1	preprocessing	pass																					483.0	0.0	241.0	83.0	37.0
-S2	preprocessing	warn																					488.7	1.0	244.0	20.0	22.0
-S3	preprocessing	pass																					485.9	1.0	242.0	70.0	33.0
-S4	preprocessing	pass																					483.1	2.0	241.0	157.0	38.0
-S1	ica	pass																	37.0	12.0	25.0	0.324					
-S2	ica	pass																	22.0	5.0	17.0	0.227					
-S3	ica	pass																	33.0	17.0	16.0	0.515					
-S4	ica	pass																	38.0	9.0	29.0	0.237					
-S1	gait_epochs	pass									302.0	302.0	0.0	248.0													
-S2	gait_epochs	pass									279.0	279.0	0.0	267.9													
-S3	gait_epochs	pass									283.0	283.0	0.0	264.9													
-S4	gait_epochs	pass									296.0	296.0	0.0	252.8													
-S1	ersp	pass	302.0	0.0	19.96	0.09	0.52	-0.52	6.209880888e-11	True																	
-S2	ersp	pass	279.0	0.0	13.64	-2.06	-2.12	-1.97	8.023490195e-11	True																	
-S3	ersp	pass	283.0	0.0	22.43	-3.63	-3.58	-3.7	7.395177971e-11	True																	
-S4	ersp	pass	296.0	0.0	17.43	-2.7	-2.7	-2.7	4.250736836e-11	True																	
+subject	stage	flag	n_cycles_used	n_nan	ersp_range_db	roi_mean_db	stance_roi_db	swing_roi_db	baseline_mean_v2	baseline_ok	n_extracted	n_total	reject_frac	mean_seg_len	n_cycles	mean_dur_s	std_dur_s	cv_dur	n_total_comps	n_brain_comps	n_excl_comps	brain_frac	concat_dur_s	n_ica_comps	n_brain_ics	n_excl_ics	use_asr	asr_cutoff
+S1	gait_events	pass													302.0	0.992	0.014	0.014										
+S10	gait_events	pass													274.0	1.094	0.018	0.016										
+S11	gait_events	pass													286.0	1.048	0.016	0.015										
+S12	gait_events	pass													286.0	1.047	0.014	0.014										
+S13	gait_events	pass													272.0	1.104	0.016	0.015										
+S14	gait_events	pass													297.0	1.007	0.016	0.016										
+S15	gait_events	pass													276.0	1.086	0.012	0.011										
+S16	gait_events	pass													280.0	1.072	0.009	0.008										
+S17	gait_events	pass													281.0	1.068	0.016	0.015										
+S18	gait_events	pass													286.0	1.047	0.015	0.015										
+S2	gait_events	pass													279.0	1.072	0.016	0.015										
+S20	gait_events	pass													285.0	1.063	0.02	0.019										
+S21	gait_events	pass													307.0	0.977	0.012	0.013										
+S23	gait_events	pass													264.0	1.132	0.016	0.014										
+S3	gait_events	pass													283.0	1.06	0.014	0.014										
+S4	gait_events	pass													296.0	1.011	0.012	0.011										
+S7	gait_events	pass													273.0	1.094	0.013	0.011										
+S9	gait_events	pass													274.0	1.092	0.012	0.011										
+S1	preprocessing	pass																					483.0	38.0	14.0	24.0	False	
+S10	preprocessing	warn																					483.5	38.0	1.0	37.0	False	
+S11	preprocessing	pass																					487.2	31.0	15.0	16.0	False	
+S12	preprocessing	pass																					486.6	35.0	4.0	31.0	False	
+S13	preprocessing	pass																					484.6	32.0	13.0	19.0	False	
+S14	preprocessing	pass																					488.0	32.0	8.0	24.0	False	
+S15	preprocessing	pass																					485.0	33.0	11.0	22.0	False	
+S16	preprocessing	pass																					489.4	32.0	7.0	25.0	False	
+S17	preprocessing	pass																					484.3	27.0	12.0	15.0	False	
+S18	preprocessing	pass																					489.3	21.0	10.0	11.0	False	
+S2	preprocessing	pass																					488.7	20.0	9.0	11.0	False	
+S20	preprocessing	pass																					490.7	29.0	10.0	19.0	False	
+S23	preprocessing	pass																					484.2	27.0	16.0	11.0	False	
+S3	preprocessing	pass																					485.9	33.0	17.0	16.0	False	
+S4	preprocessing	pass																					483.1	38.0	9.0	29.0	False	
+S7	preprocessing	pass																					485.9	34.0	9.0	25.0	False	
+S9	preprocessing	pass																					484.4	37.0	7.0	30.0	False	
+S1	ica	pass																	38.0	14.0	24.0	0.368						
+S10	ica	warn																	38.0	1.0	37.0	0.026						
+S11	ica	pass																	31.0	15.0	16.0	0.484						
+S12	ica	warn																	35.0	4.0	31.0	0.114						
+S13	ica	pass																	32.0	13.0	19.0	0.406						
+S14	ica	pass																	32.0	8.0	24.0	0.25						
+S15	ica	pass																	33.0	11.0	22.0	0.333						
+S16	ica	pass																	32.0	7.0	25.0	0.219						
+S17	ica	pass																	27.0	12.0	15.0	0.444						
+S18	ica	pass																	21.0	10.0	11.0	0.476						
+S2	ica	pass																	20.0	9.0	11.0	0.45						
+S20	ica	pass																	29.0	10.0	19.0	0.345						
+S23	ica	pass																	27.0	16.0	11.0	0.593						
+S3	ica	pass																	33.0	17.0	16.0	0.515						
+S4	ica	pass																	38.0	9.0	29.0	0.237						
+S7	ica	pass																	34.0	9.0	25.0	0.265						
+S9	ica	pass																	37.0	7.0	30.0	0.189						
+S1	gait_epochs	pass									302.0	302.0	0.0	248.0														
+S10	gait_epochs	pass									274.0	274.0	0.0	273.6														
+S11	gait_epochs	pass									285.0	286.0	0.003	261.9														
+S12	gait_epochs	pass									286.0	286.0	0.0	261.8														
+S13	gait_epochs	pass									272.0	272.0	0.0	276.0														
+S14	gait_epochs	pass									297.0	297.0	0.0	251.8														
+S15	gait_epochs	pass									276.0	276.0	0.0	271.4														
+S16	gait_epochs	pass									280.0	280.0	0.0	268.0														
+S17	gait_epochs	pass									280.0	281.0	0.004	266.9														
+S18	gait_epochs	pass									286.0	286.0	0.0	261.8														
+S2	gait_epochs	pass									279.0	279.0	0.0	267.9														
+S20	gait_epochs	pass									285.0	285.0	0.0	265.7														
+S23	gait_epochs	pass									264.0	264.0	0.0	282.9														
+S3	gait_epochs	pass									283.0	283.0	0.0	264.9														
+S4	gait_epochs	pass									296.0	296.0	0.0	252.8														
+S7	gait_epochs	pass									273.0	273.0	0.0	273.6														
+S9	gait_epochs	pass									274.0	274.0	0.0	273.1														
+S1	ersp	pass	302.0	0.0	21.46	-0.62	-0.31	-1.07	6.652078077e-11	True																		
+S10	ersp	pass	274.0	0.0	25.29	0.87	1.1	0.5	6.34889261e-12	True																		
+S11	ersp	pass	285.0	0.0	21.55	-1.78	-1.63	-2.0	1.255729328e-10	True																		
+S12	ersp	pass	286.0	0.0	14.28	-0.64	-0.55	-0.78	2.00063581e-11	True																		
+S13	ersp	pass	272.0	0.0	24.28	-0.78	-0.57	-1.09	1.934756324e-11	True																		
+S14	ersp	pass	297.0	0.0	29.15	-0.85	-0.47	-1.4	4.477837038e-11	True																		
+S15	ersp	pass	276.0	0.0	24.98	-1.07	-1.06	-1.1	6.91288127e-11	True																		
+S16	ersp	pass	280.0	0.0	24.25	-2.25	-2.21	-2.31	4.97264022e-11	True																		
+S17	ersp	pass	280.0	0.0	18.35	-0.77	-0.44	-1.26	7.889638981e-11	True																		
+S18	ersp	pass	286.0	0.0	22.02	-1.81	-1.69	-1.98	6.044959876e-11	True																		
+S2	ersp	pass	279.0	0.0	19.49	-1.59	-1.57	-1.62	1.0484100852e-10	True																		
+S20	ersp	pass	285.0	0.0	20.8	-2.91	-2.98	-2.81	1.0851151862e-10	True																		
+S23	ersp	pass	264.0	0.0	22.84	-2.62	-2.54	-2.74	1.2515734201e-10	True																		
+S3	ersp	pass	283.0	0.0	22.75	-3.62	-3.55	-3.71	7.170211978e-11	True																		
+S4	ersp	pass	296.0	0.0	18.79	-2.82	-2.82	-2.81	4.147411621e-11	True																		
+S7	ersp	pass	273.0	0.0	26.77	-1.86	-1.87	-1.86	6.494175507e-11	True																		
+S9	ersp	pass	274.0	0.0	19.17	0.0	0.12	-0.17	2.156428356e-11	True																		
