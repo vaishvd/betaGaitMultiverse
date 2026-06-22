@@ -11,7 +11,7 @@ from scipy.stats import ttest_rel
 from src.config import DATASET, DIR_MULTIVERSE_BRANCHES
 from src.paths import get_dataset_dirs
 from src.pipeline_steps import load_and_concatenate, preprocess_raw, fit_ica
-from src.spatial_filter import gaussian_roi_weights, apply_gaussian_roi
+from src.spatial_filter import linear_roi_weights, apply_linear_roi
 
 TARGET_SFREQ = 250
 AMP_THRESH   = 350e-6
@@ -20,16 +20,17 @@ N_CYCLES_WAV = FREQS / 2.0
 N_POINTS     = 101
 EDGE_CROP    = 0.05
 
-# Peak-window boundaries (% of gait cycle → sample index in 101-point axis)
-STANCE_PEAK_START = 5
-STANCE_PEAK_END   = 25
-SWING_PEAK_START  = 65
-SWING_PEAK_END    = 85
+# Literature-based peak windows (confirmatory, not data-driven)
+# Double stance ERS at heel contact: Petersen et al. 2012 J Physiol
+# Swing ERD: Bulea et al. 2015 Front Hum Neurosci;
+#            Seeber et al. 2015 Front Hum Neurosci
+DOUBLE_STANCE_WINDOWS = [(0, 20), (50, 70)]
+SWING_WINDOWS         = [(20, 50), (70, 100)]
 
 
 def _branch_dir(subject: str, decisions: dict) -> Path:
     """Subdirectory keyed on ICA-relevant decisions only."""
-    ica_keys = {"use_asr", "brain_thresh", "highpass_hz", "lowpass_hz"}
+    ica_keys = {"asr", "brain_thresh", "highpass_hz", "lowpass_hz"}
     parts = "_".join(
         f"{k}-{decisions[k]}"
         for k in sorted(ica_keys)
@@ -56,12 +57,15 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
 
     # Preprocessing 
     raw = load_and_concatenate(subject, raw_dir)
+    asr_val    = decisions["asr"]
+    use_asr    = asr_val != "none"
+    asr_cutoff = 20.0 if asr_val == "cutoff_20" else 30.0
     raw = preprocess_raw(
         raw, subject,
         highpass_hz = float(decisions["highpass_hz"]),
         lowpass_hz  = decisions["lowpass_hz"],
-        use_asr     = bool(decisions["use_asr"]),
-        asr_cutoff  = 30.0,
+        use_asr     = use_asr,
+        asr_cutoff  = asr_cutoff,
     )
     raw_clean, ica, n_brain = fit_ica(
         raw, subject,
@@ -150,10 +154,10 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
             tfr_stack / baseline_walk[np.newaxis, :, :, np.newaxis]
         )
 
-    # Gaussian spatial filter
+    # Linear spatial filter
     raw_ref = mne.io.read_raw_fif(iclean_path, preload=False, verbose=False)
-    weights = gaussian_roi_weights(raw_ref.info, center_ch="Cz", sigma_mm=40.0)
-    ersp_w  = np.stack([apply_gaussian_roi(ersp[k], weights)
+    weights = linear_roi_weights(raw_ref.info, center_ch="Cz")
+    ersp_w  = np.stack([apply_linear_roi(ersp[k], weights)
                         for k in range(len(ersp))])   # (cycles, freq, time)
 
     # Phase split 
@@ -162,34 +166,33 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
     ).astype(int)
 
     if decisions["phase_window"] == "full":
-        stance = np.array([ersp_w[k, :, :rto_idx[k]].mean()
-                           for k in range(len(rto_idx))])
-        swing  = np.array([ersp_w[k, :, rto_idx[k]:].mean()
-                           for k in range(len(rto_idx))])
+        double_stance = np.array([ersp_w[k, :, :rto_idx[k]].mean()
+                                   for k in range(len(rto_idx))])
+        swing         = np.array([ersp_w[k, :, rto_idx[k]:].mean()
+                                   for k in range(len(rto_idx))])
     else:   # "peak"
         def _idx(pct):
             return int(round(pct / 100 * (N_POINTS - 1)))
-        stance = np.array([
-            ersp_w[k, :, _idx(STANCE_PEAK_START):_idx(STANCE_PEAK_END)].mean()
-            for k in range(len(rto_idx))
-        ])
-        swing  = np.array([
-            ersp_w[k, :, _idx(SWING_PEAK_START):_idx(SWING_PEAK_END)].mean()
-            for k in range(len(rto_idx))
-        ])
+        def _pool(arr, windows):
+            idx = np.concatenate([np.arange(_idx(s), _idx(e)) for s, e in windows])
+            return arr[:, idx].mean()
+        double_stance = np.array([_pool(ersp_w[k], DOUBLE_STANCE_WINDOWS)
+                                   for k in range(len(rto_idx))])
+        swing         = np.array([_pool(ersp_w[k], SWING_WINDOWS)
+                                   for k in range(len(rto_idx))])
 
-    t_stat, t_pval = ttest_rel(stance, swing)
+    t_stat, t_pval = ttest_rel(double_stance, swing)
     print(f"  sub-{subject}: t={t_stat:.2f}  p={t_pval:.4f}  "
-          f"stance={stance.mean():+.2f}  swing={swing.mean():+.2f}  "
-          f"n_cycles={len(stance)}")
+          f"double_stance={double_stance.mean():+.2f}  swing={swing.mean():+.2f}  "
+          f"n_cycles={len(double_stance)}")
 
     return {
-        "subject":          subject,
-        "t_stat":           float(t_stat),
-        "t_pval":           float(t_pval),
-        "beta_stance_mean": float(stance.mean()),
-        "beta_swing_mean":  float(swing.mean()),
-        "n_cycles":         len(stance),
-        "n_brain_ics":      int(n_brain),
+        "subject":                 subject,
+        "t_stat":                  float(t_stat),
+        "t_pval":                  float(t_pval),
+        "beta_double_stance_mean": float(double_stance.mean()),
+        "beta_swing_mean":         float(swing.mean()),
+        "n_cycles":                len(double_stance),
+        "n_brain_ics":             int(n_brain),
         **decisions,
     }
