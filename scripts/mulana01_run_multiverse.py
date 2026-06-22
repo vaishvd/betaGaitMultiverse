@@ -68,3 +68,47 @@ def analysis_template():
 mverse = Multiverse(name="beta_gait_multiverse")
 mverse.create(analysis_template, forking_paths)
 mverse.summary()
+
+mverse.visualize(figsize=(16, 8), text_size=10, node_size=4000)
+
+# Run the multiverse (this will run all universes in parallel on COMET)
+mverse.run(parallel=1)
+
+#Visualization of multiverse in a specification curve
+name_map = {
+    "t_stats":       "Subject t-statistics\n(double stance vs swing\nbeta power)",
+    "use_asr":       "ASR\ndenoising",
+    "brain_thresh":  "ICLabel\nbrain threshold",
+    "baseline_type": "Baseline\ntype",
+    "phase_window":  "Phase\nwindow",
+}
+
+mverse.specification_curve(
+    measure      = "t_stats",
+    name_map     = name_map,
+    p_value      = 0.05,
+    ci           = 95,
+    smooth_ci    = True,
+    cmap         = "Set3",
+    figsize      = (11, 8),
+    fontsize     = 10,
+    height_ratio = [1, 1],
+    ftype        = "pdf",
+)
+
+# Visualization of multiverse in a density plot
+name_map = {
+    "group_t_mean":  "Group t-statistic\n(double stance vs swing)",
+    "use_asr":       "ASR denoising",
+    "brain_thresh":  "ICLabel brain threshold",
+    "baseline_type": "Baseline type",
+    "phase_window":  "Phase window",
+}
+
+mverse.multiverse_plot(
+    measure  = "group_t_mean",
+    n_bins   = 4,
+    name_map = name_map,
+    baseline = 0,
+)
+
