@@ -36,9 +36,12 @@ from src.spatial_filter import linear_roi_weights, apply_linear_roi
 FREQS      = np.arange(13, 31)
 ERSP_CLIM  = 4.0
 
-# Peak phase windows (% of gait cycle)
-DOUBLE_STANCE_WINDOWS = [(5, 15), (55, 65)]
-SWING_WINDOWS         = [(25, 45), (65, 85)]
+# Literature-based peak windows (confirmatory, not data-driven)
+# Double stance ERS at heel contact: Petersen et al. 2012 J Physiol
+# Swing ERD: Bulea et al. 2015 Front Hum Neurosci;
+#            Seeber et al. 2015 Front Hum Neurosci
+DOUBLE_STANCE_WINDOWS = [(0, 20), (50, 70)]
+SWING_WINDOWS         = [(20, 50), (70, 100)]
 
 dirs          = get_dataset_dirs(DATASET)
 ERSP_DIR      = dirs["ersp"]

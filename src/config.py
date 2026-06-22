@@ -13,11 +13,9 @@ SUBJECTS = [
 # Excluded:
 #   S10 — ICA failure: 1/38 brain ICs (brain_frac=0.026), signal quality insufficient
 #   S21 — AutoReject failure: only 12/243 clean epochs, extreme artifact contamination (bad P1)
-#   S2  — included: passes canonical pipeline (9/20 brain ICs, brain_frac=0.45);
-#          previously excluded only from 32-universe dev run due to 0.1 Hz highpass
-#          epoch dropout — now included as full cohort multiverse uses all 6 decisions
+#   S2 — AutoReject failure with only 12/243 clean epochs.
 MULTIVERSE_SUBJECTS = [
-    "S1", "S2", "S3", "S4", "S7", "S9", "S11",
+    "S1", "S3", "S4", "S7", "S9", "S11",
     "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S20", "S23",
 ]
 
