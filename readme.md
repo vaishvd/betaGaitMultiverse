@@ -156,7 +156,7 @@ end
 subgraph S5["prepana05 — TFR + ERSP"]
   E1["Morlet wavelets\n13–30 Hz, n_cycles = f/2"]:::step
   E2["Time-normalise\n0–100% gait cycle"]:::step
-  E3["Gaussian ROI\nCz, σ = 40 mm"]:::step
+  E3["Linear ROI\nCz"]:::step
   E4["ERSP\n(standing baseline)"]:::step
   E1 --> E2 --> E3 --> E4
 end
