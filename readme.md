@@ -110,7 +110,7 @@ prepana04: Gait Cycle Extraction
       ↓
 prepana05: TFR + ERSP
           (Morlet wavelets 13–30 Hz, time-normalise to 0–100%,
-           Gaussian ROI Cz σ=40 mm, standing baseline)
+           Linear ROI Cz, standing baseline)
       ↓
 prepana06: Group Beta ERSP Figure
           (average across subjects, heatmap with gait phase markers)
@@ -156,7 +156,7 @@ end
 subgraph S5["prepana05 — TFR + ERSP"]
   E1["Morlet wavelets\n13–30 Hz, n_cycles = f/2"]:::step
   E2["Time-normalise\n0–100% gait cycle"]:::step
-  E3["Gaussian ROI\nCz, σ = 40 mm"]:::step
+  E3["Linear ROI\nCz"]:::step
   E4["ERSP\n(standing baseline)"]:::step
   E1 --> E2 --> E3 --> E4
 end
