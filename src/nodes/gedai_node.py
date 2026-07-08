@@ -17,7 +17,7 @@ def apply_gedai_node(
     duration: float = 2.0,
     overlap: float = 0.5,
     noise_multiplier: float = 3.0,
-    sensai_method: str = "gridsearch",
+    sensai_method: str = "optimize",
 ) -> mne.io.BaseRaw:
     """
     Optionally apply GEDAI to a preprocessed raw recording.
