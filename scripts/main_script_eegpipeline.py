@@ -24,7 +24,6 @@ STAGES = [
     (6, "prepana06_plotbetagait.py",     "group ERSP figure"),
 ]
 
-print(f"\nbetaGaitMultiverse — canonical pipeline")
 print(f"Dataset  : {DATASET}")
 print(f"Subjects : {SUBJECTS}")
 
