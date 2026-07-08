@@ -19,6 +19,7 @@ from src.preprocessing import (
 )
 from src.ica_utils import run_ica, label_and_mark_ica
 from src.nodes.asr_node import apply_asr_node
+from src.nodes.gedai_node import apply_gedai_node
 
 TARGET_SFREQ = 250
 LINE_FREQ    = 50.0
@@ -94,19 +95,23 @@ def preprocess_raw(
     lowpass_hz: float | None = 60.0,
     use_asr: bool = False,
     asr_cutoff: float = 30.0,
+    use_gedai: bool = False,
+    gedai_noise_multiplier: float = 3.0,
 ) -> mne.io.BaseRaw:
     """
     Apply filtering, bad-channel interpolation, optional ASR,
-    and average reference to a concatenated raw recording.
+    optional GEDAI, and average reference to a concatenated raw recording.
 
     Parameters
     ----------
-    raw         : preloaded concatenated raw (STAND + CS)
-    subject     : subject id for logging
-    highpass_hz : high-pass filter cutoff in Hz
-    lowpass_hz  : low-pass filter cutoff in Hz, or None to skip
-    use_asr     : whether to apply ASR before referencing
-    asr_cutoff  : ASR SD threshold (default 30, Gorjan et al. 2022)
+    raw                    : preloaded concatenated raw (STAND + CS)
+    subject                : subject id for logging
+    highpass_hz            : high-pass filter cutoff in Hz
+    lowpass_hz             : low-pass filter cutoff in Hz, or None to skip
+    use_asr                : whether to apply ASR before referencing
+    asr_cutoff             : ASR SD threshold (default 30, Gorjan et al. 2022)
+    use_gedai              : whether to apply GEDAI after ASR
+    gedai_noise_multiplier : GEDAI component rejection threshold (default 3.0)
 
     Returns
     -------
@@ -143,11 +148,29 @@ def preprocess_raw(
                 raw.times[-1])
         )
         calib = calib.crop(tmax=calib.times[-1] - 2.0)
+        calib_dur = calib.times[-1] - calib.times[0]
+        print(f"  sub-{subject}: ASR calibration duration = "
+              f"{calib_dur:.1f}s")
+        if calib_dur < 120.0:
+            raise RuntimeError(
+                f"sub-{subject}: ASR calibration too short "
+                f"({calib_dur:.1f}s < 120s required)"
+            )
         raw = apply_asr_node(raw, apply=True,
                              calib_raw=calib, cutoff=asr_cutoff)
         print(f"  sub-{subject}: ASR applied (cutoff={asr_cutoff})")
     else:
         print(f"  sub-{subject}: ASR skipped")
+
+    if use_gedai:
+        raw = apply_gedai_node(
+            raw,
+            apply=True,
+            noise_multiplier=gedai_noise_multiplier,
+        )
+        print(f"  sub-{subject}: GEDAI applied")
+    else:
+        print(f"  sub-{subject}: GEDAI skipped")
 
     raw.set_eeg_reference("average", projection=False, verbose=False)
     return raw

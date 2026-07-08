@@ -35,10 +35,12 @@ from src.config import DATASET, SUBJECTS
 from src.qc import log_qc
 from src.spatial_filter import linear_roi_weights, apply_linear_roi, plot_weight_topography
 
-FREQS    = np.arange(13, 31, dtype=float)   # beta band 13-30 Hz
+FREQS    = np.arange(8, 41, dtype=float)    # 8-40 Hz (alpha-beta range)
 N_CYCLES = FREQS / 2.0                      # frequency-dependent wavelet width
 N_POINTS = 101  # 0-100% gait cycle in 1% steps; below native resolution (~248 samples at 250 Hz), avoids upsampling artefacts
 EDGE_CROP = 0.05                            # fraction trimmed at each edge post-TFR
+DOUBLE_STANCE_WINDOWS = [(0, 20), (50, 70)]   # gait cycle % for segment QC print
+SWING_WINDOWS         = [(20, 50), (70, 100)]
 
 # Note on edge artefacts: at 13 Hz with n_cycles=6.5, the wavelet window
 # is ~500 ms. Mean cycle duration is ~992 ms, so edge contamination extends
@@ -307,10 +309,14 @@ for subject in SUBJECTS:
         ersp_double_stance = double_stance_ersp_per_cycle.mean(axis=0)  # (n_ch, n_freqs)
         ersp_swing         = swing_ersp_per_cycle.mean(axis=0)          # (n_ch, n_freqs)
 
-        print(f"  Double stance ERSP (sensorimotor mean): "
-              f"{ersp_double_stance[[stand_ch_names.index(c) for c in ['Cz','C3','C4'] if c in stand_ch_names]].mean():+.2f} dB")
-        print(f"  Swing         ERSP (sensorimotor mean): "
-              f"{ersp_swing[[stand_ch_names.index(c) for c in ['Cz','C3','C4'] if c in stand_ch_names]].mean():+.2f} dB")
+        _pi     = lambda pct: int(round(pct / 100 * (N_POINTS - 1)))
+        _ds_idx = np.concatenate([np.arange(_pi(s), _pi(e)) for s, e in DOUBLE_STANCE_WINDOWS])
+        _sw_idx = np.concatenate([np.arange(_pi(s), _pi(e)) for s, e in SWING_WINDOWS])
+        _smx    = [stand_ch_names.index(c) for c in ['Cz', 'C3', 'C4'] if c in stand_ch_names]
+        print(f"  Double stance ERSP (segment, sensorimotor mean): "
+              f"{ersp_avg[_smx][:, :, _ds_idx].mean():+.2f} dB")
+        print(f"  Swing         ERSP (segment, sensorimotor mean): "
+              f"{ersp_avg[_smx][:, :, _sw_idx].mean():+.2f} dB")
 
         np.save(ERSP_DIR / f"sub-{subject}_ersp_double_stance.npy", ersp_double_stance)
         np.save(ERSP_DIR / f"sub-{subject}_ersp_swing.npy",         ersp_swing)

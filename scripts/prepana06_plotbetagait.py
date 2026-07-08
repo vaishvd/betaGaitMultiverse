@@ -33,7 +33,7 @@ from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS, DIR_PLOTS
 from src.spatial_filter import linear_roi_weights, apply_linear_roi
 
-FREQS      = np.arange(13, 31)
+FREQS      = np.arange(8, 41)
 ERSP_CLIM  = 4.0
 
 # Literature-based peak windows (confirmatory, not data-driven)
@@ -176,14 +176,20 @@ for pct, label in heatmap_events:
         linestyle=":", zorder=3
     )
 
+# Alpha/beta boundary at 13 Hz; beta top at 30 Hz
+ax_heat.axhline(13, color="white", linewidth=0.8,
+                linestyle="--", alpha=0.6, zorder=4)
+ax_heat.axhline(30, color="white", linewidth=0.8,
+                linestyle="--", alpha=0.6, zorder=4)
+
 cbar = fig.colorbar(im, ax=ax_heat, fraction=0.020, pad=0.01)
 cbar.set_label("ERSP (dB)", fontsize=9)
 cbar.ax.tick_params(labelsize=8)
 
 ax_heat.set_ylabel("Frequency (Hz)", fontsize=10)
 ax_heat.set_xlim(0, 100)
-ax_heat.set_ylim(FREQS[0] - 0.5, FREQS[-1] + 0.5)
-ax_heat.set_yticks([13, 16, 20, 24, 28, 30])
+ax_heat.set_ylim(7.5, 40.5)
+ax_heat.set_yticks([8, 13, 20, 30, 40])
 ax_heat.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
 ax_heat.tick_params(axis="y", labelsize=8)
 ax_heat.spines["bottom"].set_visible(False)
@@ -235,13 +241,13 @@ for spine in ax_events.spines.values():
     spine.set_visible(False)
 
 # Row 3 — phase bar row
-DS_COLOR    = "#C4BFBF"   # dark grey — double support (IDS, FDS)
+DS_COLOR    = "#C4BFBF"   # dark grey — double support (DS)
 SWING_COLOR = "#D2D899"   # blue      — swing (RLS, LLS)
 
 phase_bars = [
-    (0,               mean_lto_group,                    DS_COLOR,    "IDS"),
+    (0,               mean_lto_group,                    DS_COLOR,    "DS"),
     (mean_lto_group,  mean_lhs_group - mean_lto_group,   SWING_COLOR, "LLS"),
-    (mean_lhs_group,  mean_rto_group - mean_lhs_group,   DS_COLOR,    "FDS"),
+    (mean_lhs_group,  mean_rto_group - mean_lhs_group,   DS_COLOR,    "DS"),
     (mean_rto_group,  100 - mean_rto_group,               SWING_COLOR, "RLS"),
 ]
 

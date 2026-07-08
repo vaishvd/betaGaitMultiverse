@@ -62,10 +62,11 @@ for subject in SUBJECTS:
         raw_concat = preprocess_raw(
             raw_concat,
             subject,
-            highpass_hz = L_FREQ,
+            highpass_hz = 1.0,
             lowpass_hz  = H_FREQ,
             use_asr     = USE_ASR,
             asr_cutoff  = ASR_CUTOFF,
+            use_gedai   = False,   # GEDAI not active in canonical pipeline
         )
 
         # Save preprocessed concatenated raw
