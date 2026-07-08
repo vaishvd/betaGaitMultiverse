@@ -15,7 +15,7 @@ from src.spatial_filter import linear_roi_weights, apply_linear_roi
 
 TARGET_SFREQ = 250
 AMP_THRESH   = 350e-6
-FREQS        = np.arange(13, 31, dtype=float)
+FREQS        = np.arange(8, 41, dtype=float)
 N_CYCLES_WAV = FREQS / 2.0
 N_POINTS     = 101
 EDGE_CROP    = 0.05
@@ -30,7 +30,7 @@ SWING_WINDOWS         = [(20, 50), (70, 100)]
 
 def _branch_dir(subject: str, decisions: dict) -> Path:
     """Subdirectory keyed on ICA-relevant decisions only."""
-    ica_keys = {"asr", "brain_thresh", "highpass_hz", "lowpass_hz"}
+    ica_keys = {"use_asr", "use_gedai", "brain_thresh", "highpass_hz", "lowpass_hz"}
     parts = "_".join(
         f"{k}-{decisions[k]}"
         for k in sorted(ica_keys)
@@ -57,15 +57,16 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
 
     # Preprocessing 
     raw = load_and_concatenate(subject, raw_dir)
-    asr_val    = decisions["asr"]
-    use_asr    = asr_val != "none"
-    asr_cutoff = 20.0 if asr_val == "cutoff_20" else 30.0
+    use_asr    = bool(decisions["use_asr"])
+    asr_cutoff = 30.0
     raw = preprocess_raw(
         raw, subject,
-        highpass_hz = float(decisions["highpass_hz"]),
-        lowpass_hz  = decisions["lowpass_hz"],
-        use_asr     = use_asr,
-        asr_cutoff  = asr_cutoff,
+        highpass_hz            = float(decisions["highpass_hz"]),
+        lowpass_hz             = decisions["lowpass_hz"],
+        use_asr                = use_asr,
+        asr_cutoff             = asr_cutoff,
+        use_gedai              = decisions.get("use_gedai", False),
+        gedai_noise_multiplier = float(decisions.get("gedai_noise_multiplier", 3.0)),
     )
     raw_clean, ica, n_brain = fit_ica(
         raw, subject,
@@ -170,7 +171,7 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
                                    for k in range(len(rto_idx))])
         swing         = np.array([ersp_w[k, :, rto_idx[k]:].mean()
                                    for k in range(len(rto_idx))])
-    else:   # "peak"
+    else:   # "segment"
         def _idx(pct):
             return int(round(pct / 100 * (N_POINTS - 1)))
         def _pool(arr, windows):
