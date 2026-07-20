@@ -13,8 +13,10 @@ ana02_raw2ica.py
 
 Input
 -----
-d00_raw/  sub-{sub}/eeg/sub-{sub}_task-STAND.vhdr
-d00_raw/  sub-{sub}/eeg/sub-{sub}_task-CS.vhdr
+d00_raw/  dataset-specific raw recording(s), loaded and annotated with
+          "STAND"/"CS" regions by src.pipeline_steps.load_and_concatenate
+          (BrainVision sub-{sub}_task-STAND.vhdr + _task-CS.vhdr for
+          stepup; one continuous EEGLAB .set for Jacobsen ds003039)
 
 Output
 ------
@@ -47,16 +49,11 @@ QC_DIR   = dirs["qc"]
 
 for subject in SUBJECTS:
     try:
-        stand_path = RAW_DIR / f"sub-{subject}" / "eeg" / f"sub-{subject}_task-STAND.vhdr"
-        walk_path  = RAW_DIR / f"sub-{subject}" / "eeg" / f"sub-{subject}_task-CS.vhdr"
-        missing = [p for p in [stand_path, walk_path] if not p.exists()]
-        if missing:
-            for p in missing:
-                print(f"  [SKIP] sub-{subject}: missing {p.name}")
-            continue
-
         print(f"\nProcessing sub-{subject}")
 
+        # load_and_concatenate() raises FileNotFoundError for whichever
+        # dataset-specific raw file is missing (BrainVision .vhdr or
+        # EEGLAB .set, see src.pipeline_steps), caught below.
         raw_concat = load_and_concatenate(subject, RAW_DIR)
 
         raw_concat = preprocess_raw(
@@ -66,7 +63,7 @@ for subject in SUBJECTS:
             lowpass_hz  = H_FREQ,
             use_asr     = USE_ASR,
             asr_cutoff  = ASR_CUTOFF,
-            use_gedai   = False,   # GEDAI not active in canonical pipeline
+            use_gedai   = False,   # GEDAI not active in main pipeline
         )
 
         # Save preprocessed concatenated raw
