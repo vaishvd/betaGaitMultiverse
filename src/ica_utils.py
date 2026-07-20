@@ -8,6 +8,14 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 from mne_icalabel import label_components
+from mne_icalabel.iclabel import iclabel_label_components
+
+# Column order of the raw ICLabel probability matrix
+# (mne_icalabel.label_components.ICALABEL_METHODS_NUMERICAL_TO_STRING["iclabel"]).
+ICLABEL_CLASSES = [
+    "brain", "muscle artifact", "eye blink", "heart beat",
+    "line noise", "channel noise", "other",
+]
 
 
 def run_ica(
@@ -66,6 +74,67 @@ def label_and_mark_ica(
         "brain_ics":   brain_ics,
         "exclude_ics": exclude_ics,
     }
+
+
+def iclabel_probabilities(
+    ica: mne.preprocessing.ICA,
+    epochs: mne.Epochs,
+) -> tuple[np.ndarray, list[str]]:
+    """
+    Run ICLabel and return the full per-class probability matrix.
+
+    Unlike label_and_mark_ica() / mne_icalabel.label_components(), this
+    keeps every class's probability (not just the argmax), so a caller
+    can apply more than one exclusion rule to the same ICLabel run
+    without recomputing it (see select_ics_by_rule()).
+
+    Parameters
+    ----------
+    ica    : fitted mne.preprocessing.ICA
+    epochs : mne.Epochs used to fit `ica` (ICLabel needs these for features)
+
+    Returns
+    -------
+    probs  : ndarray, shape (n_components, 7)
+        Columns ordered per ICLABEL_CLASSES: brain, muscle artifact,
+        eye blink, heart beat, line noise, channel noise, other.
+    labels : list of str, length n_components
+        Argmax class label per component (for logging only).
+    """
+    probs = iclabel_label_components(epochs, ica)
+    labels = [ICLABEL_CLASSES[i] for i in probs.argmax(axis=1)]
+    return probs, labels
+
+
+def select_ics_by_rule(probs: np.ndarray, rule: str) -> list[int]:
+    """
+    Decide which ICA components to exclude from an existing ICLabel
+    probability matrix, without refitting ICA or ICLabel.
+
+    Parameters
+    ----------
+    probs : ndarray, shape (n_components, 7)
+        From iclabel_probabilities(), columns ordered per ICLABEL_CLASSES.
+    rule  : {"conservative", "balanced", "liberal"}
+        conservative -> keep only ICs with P(brain) > 0.9
+        balanced     -> keep only ICs with P(brain) > 0.7
+        liberal      -> reject only ICs with P(muscle) > 0.9 or P(eye) > 0.9
+
+    Returns
+    -------
+    exclude_ics : list of int
+        Component indices to exclude (assign to ica.exclude).
+    """
+    p_brain, p_muscle, p_eye = probs[:, 0], probs[:, 1], probs[:, 2]
+    if rule == "conservative":
+        keep = p_brain > 0.9
+    elif rule == "balanced":
+        keep = p_brain > 0.7
+    elif rule == "liberal":
+        keep = ~((p_muscle > 0.9) | (p_eye > 0.9))
+    else:
+        raise ValueError(f"Unknown iclabel_rule: {rule!r}")
+    return [i for i, k in enumerate(keep) if not k]
 
 
 def save_ica_component_plots(

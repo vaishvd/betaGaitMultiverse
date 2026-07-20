@@ -207,6 +207,83 @@ def heel_relative_signal(heel, pelvis):
 
 # Gait event detection
 
+def load_gait_events_from_tsv(
+    events_tsv, segment_start_value, segment_end_value, gait_event_values,
+):
+    """
+    Read pre-computed heel-strike/toe-off sample arrays from a BIDS
+    events.tsv, restricted to one named segment.
+
+    Used instead of motion-capture detection (detect_gait_events) when
+    gait events are already provided by the dataset authors as event
+    labels rather than raw kinematic traces (e.g. Jacobsen ds003039,
+    where LeftHS/RightHS/LeftTO/RightTO come from foot accelerometers).
+
+    Returned sample indices are relative to `segment_start_value`'s own
+    "sample" value (i.e. 0 at the segment start), matching the local
+    time axis of a raw that has been cropped to the corresponding "CS"
+    annotation window (see src.pipeline_steps._load_and_annotate_eeglab
+    and prepana04_clean2gaitcycles.py's raw.crop(walk_start, walk_stop))
+    -- NOT absolute sample positions in the full recording.
+
+    Parameters
+    ----------
+    events_tsv : str | Path
+        Path to the subject's BIDS ``*_events.tsv``. Must have
+        ``onset``, ``sample``, and ``value`` columns (BIDS convention).
+    segment_start_value, segment_end_value : str
+        The `value` entries marking the start/end of the segment to
+        keep (e.g. "start_easy" / "end_easy").
+    gait_event_values : dict
+        Maps the four canonical event codes to this dataset's `value`
+        strings, e.g. {"LHS": "LeftHS", "RHS": "RightHS",
+        "LTO": "LeftTO", "RTO": "RightTO"}.
+
+    Returns
+    -------
+    lhs, lto, rhs, rto : np.ndarray (int)
+        Segment-relative sample indices for each event type, sorted.
+    seg_t0, seg_t1 : float
+        Segment onset/offset in seconds, absolute within the full
+        recording (from the `onset` column) -- for annotating the raw.
+
+    Raises
+    ------
+    ValueError
+        If either segment marker is not found exactly once.
+    """
+    events = pd.read_csv(events_tsv, sep="\t")
+
+    def _row(value):
+        rows = events.loc[events["value"] == value]
+        if len(rows) != 1:
+            raise ValueError(
+                f"Expected exactly one '{value}' event in "
+                f"{Path(events_tsv).name}, found {len(rows)}"
+            )
+        return rows.iloc[0]
+
+    seg_start_row = _row(segment_start_value)
+    seg_end_row   = _row(segment_end_value)
+    seg_t0 = float(seg_start_row["onset"])
+    seg_t1 = float(seg_end_row["onset"])
+    seg_sample0 = float(seg_start_row["sample"])
+
+    in_segment = (events["onset"] >= seg_t0) & (events["onset"] <= seg_t1)
+
+    def _samples(code):
+        rows = events[in_segment & (events["value"] == gait_event_values[code])]
+        rel = rows["sample"].to_numpy(dtype=float) - seg_sample0
+        return np.sort(rel).astype(int)
+
+    lhs = _samples("LHS")
+    lto = _samples("LTO")
+    rhs = _samples("RHS")
+    rto = _samples("RTO")
+
+    return lhs, lto, rhs, rto, seg_t0, seg_t1
+
+
 def detect_gait_events(signal, fs, cutoff=6.0, min_step_time=0.5):
     """
     Detect heel-strike and toe-off events from a relative heel signal.

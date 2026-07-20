@@ -26,6 +26,7 @@ d05_ersp/
     sub-{sub}_ersp_beta.npy           shape (n_ch, n_freqs, N_POINTS)
 """
 
+import json
 import numpy as np
 import pandas as pd
 import mne
@@ -34,13 +35,12 @@ from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS
 from src.qc import log_qc
 from src.spatial_filter import linear_roi_weights, apply_linear_roi, plot_weight_topography
+from src.ersp import warp_cycle_to_grid, phase_split_indices, compute_standing_baseline
 
 FREQS    = np.arange(8, 41, dtype=float)    # 8-40 Hz (alpha-beta range)
 N_CYCLES = FREQS / 2.0                      # frequency-dependent wavelet width
 N_POINTS = 101  # 0-100% gait cycle in 1% steps; below native resolution (~248 samples at 250 Hz), avoids upsampling artefacts
 EDGE_CROP = 0.05                            # fraction trimmed at each edge post-TFR
-DOUBLE_STANCE_WINDOWS = [(0, 20), (50, 70)]   # gait cycle % for segment QC print
-SWING_WINDOWS         = [(20, 50), (70, 100)]
 
 # Note on edge artefacts: at 13 Hz with n_cycles=6.5, the wavelet window
 # is ~500 ms. Mean cycle duration is ~992 ms, so edge contamination extends
@@ -60,6 +60,60 @@ GAITEPOCH_DIR = dirs["gaitepochs"]
 ERSP_DIR      = dirs["ersp"]
 QC_DIR        = dirs["qc"]
 ROI_TOPO_DIR  = dirs["roi_topo"]
+
+
+# --- Group-median gait-event anchors (computed once, pooled across every
+# subject's kept cycles, before the per-subject loop) ---
+# Pooling all cycles from all subjects together (rather than taking the
+# median of each subject's median) is the simpler option and is used here;
+# it weights every cycle equally instead of every subject equally.
+# These anchors define where LTO/LHS/RTO fall on the common 0-100% gait
+# cycle grid. They are used below (a) to warp each cycle's power time
+# series with a 4-segment piecewise-linear map instead of a single
+# endpoint-only stretch, and (b) to define the double-stance/swing phase
+# windows on the resulting fixed grid.
+_f_lto, _f_lhs, _f_rto = [], [], []
+for _subject in SUBJECTS:
+    _meta_path = GAITEPOCH_DIR / f"sub-{_subject}_cycles_kept.tsv"
+    if not _meta_path.exists():
+        continue
+    _meta = pd.read_csv(_meta_path, sep="\t")
+    if len(_meta) == 0:
+        continue
+    _dur = _meta["rhs_end_s"] - _meta["rhs_start_s"]
+    _f_lto.append(((_meta["lto_s"] - _meta["rhs_start_s"]) / _dur).values)
+    _f_lhs.append(((_meta["lhs_s"] - _meta["rhs_start_s"]) / _dur).values)
+    _f_rto.append(((_meta["rto_s"] - _meta["rhs_start_s"]) / _dur).values)
+
+if not _f_lto:
+    raise RuntimeError(
+        "No sub-*_cycles_kept.tsv files found in GAITEPOCH_DIR -- "
+        "cannot compute group gait-event anchors. Run prepana04 first."
+    )
+
+A_lto = float(np.median(np.concatenate(_f_lto))) * 100
+A_lhs = float(np.median(np.concatenate(_f_lhs))) * 100
+A_rto = float(np.median(np.concatenate(_f_rto))) * 100
+
+n_subjects_pooled = len(_f_lto)
+n_cycles_pooled   = sum(len(a) for a in _f_lto)
+
+assert 0 < A_lto < A_lhs < A_rto < 100, \
+    f"Group anchors are not monotonic: A_lto={A_lto}, A_lhs={A_lhs}, A_rto={A_rto}"
+
+print(f"Group-median gait-event anchors "
+      f"(pooled across {n_subjects_pooled} subjects, {n_cycles_pooled} cycles):")
+print(f"  A_lto = {A_lto:.2f}%   A_lhs = {A_lhs:.2f}%   A_rto = {A_rto:.2f}%")
+
+with open(ERSP_DIR / "group_gait_event_anchors.json", "w") as _f:
+    json.dump({
+        "A_lto_pct":         A_lto,
+        "A_lhs_pct":         A_lhs,
+        "A_rto_pct":         A_rto,
+        "n_subjects_pooled": n_subjects_pooled,
+        "n_cycles_pooled":   n_cycles_pooled,
+    }, _f, indent=2)
+print(f"  Saved -> group_gait_event_anchors.json")
 
 
 for subject in SUBJECTS:
@@ -86,6 +140,19 @@ for subject in SUBJECTS:
 
         print(f"  Gait segments: {len(gait_segments)}  sfreq={gait_sfreq:.0f} Hz")
 
+        # Per-cycle event metadata (lto_s/lhs_s/rto_s), row-aligned with
+        # gait_segments by construction in ana04 (both built in the same
+        # loop over kept cycles). Needed below to warp each cycle's power
+        # time series onto the group-median event anchors.
+        cycles_meta = pd.read_csv(
+            GAITEPOCH_DIR / f"sub-{subject}_cycles_kept.tsv", sep="\t"
+        )
+        if len(cycles_meta) != len(gait_segments):
+            raise RuntimeError(
+                f"cycles_kept.tsv has {len(cycles_meta)} rows but gait_segments has "
+                f"{len(gait_segments)} cycles -- ana04 meta/segment misalignment."
+            )
+
         # Standing baseline -- extract from ICA-cleaned concatenated raw using annotation
 
         stand_annot = [a for a in concat_raw.annotations if a["description"] == "STAND"]
@@ -106,55 +173,12 @@ for subject in SUBJECTS:
             )
         raw_stand = raw_stand.crop(tmax=stand_tmax)
 
-        stand_sfreq    = raw_stand.info["sfreq"]
         stand_ch_names = list(raw_stand.ch_names)
 
-        events = mne.make_fixed_length_events(raw_stand, duration=2.0)
-        stand_epochs = mne.Epochs(
-            raw_stand, events,
-            tmin=0, tmax=2.0,
-            baseline=None,
-            preload=True,
-            reject_by_annotation=False,
-            verbose=False,
+        baseline_power = compute_standing_baseline(
+            raw_stand, FREQS, N_CYCLES,
+            edge_crop=EDGE_CROP, amp_thresh=AMP_THRESH_BASELINE,
         )
-        stand_epochs.drop_bad(reject=dict(eeg=AMP_THRESH_BASELINE))
-        print(f"  Standing epochs kept: {len(stand_epochs)}")
-
-        stand_tfr_list = []
-
-        for epoch in stand_epochs.get_data():   # epoch: (n_ch, n_time)
-            if np.max(np.abs(epoch)) > AMP_THRESH_BASELINE:
-                continue
-            tfr = mne.time_frequency.tfr_array_morlet(
-                epoch[np.newaxis],
-                sfreq=stand_sfreq,
-                freqs=FREQS,
-                n_cycles=N_CYCLES,
-                output="power",
-                zero_mean=True,
-                verbose=False,
-            )[0]   # (n_ch, n_freqs, n_time)
-
-            crop = int(EDGE_CROP * tfr.shape[-1])
-            if crop > 0:
-                tfr = tfr[..., crop:-crop]
-
-            stand_tfr_list.append(tfr)
-
-        print(f"  Standing epochs accepted for baseline: {len(stand_tfr_list)} / "
-              f"{len(stand_epochs)}")
-
-        if len(stand_tfr_list) == 0:
-            raise RuntimeError(
-                f"sub-{subject}: all standing epochs rejected -- "
-                f"cannot compute baseline"
-            )
-
-        stand_tfr_stack = np.stack(stand_tfr_list)   # (n_kept, n_ch, n_freqs, n_time_cropped)
-        baseline_power  = stand_tfr_stack.mean(axis=(0, 3))   # (n_ch, n_freqs)
-        assert baseline_power.shape == (stand_tfr_stack.shape[1], stand_tfr_stack.shape[2]), \
-            f"Baseline shape {baseline_power.shape} does not match expected (n_ch, n_freqs)"
 
         print(f"  Baseline shape: {baseline_power.shape}  "
               f"range=[{baseline_power.min():.4e}, {baseline_power.max():.4e}]")
@@ -165,9 +189,10 @@ for subject in SUBJECTS:
         # Per cycle TFR
 
         tfr_cycles = []
-        n_rej = 0
+        n_rej     = 0
+        n_rej_evt = 0
 
-        for seg in gait_segments:   # seg: (n_ch_ref, n_samp_i)
+        for i, seg in enumerate(gait_segments):   # seg: (n_ch_ref, n_samp_i)
 
             seg_ch = seg[ref_idx]   # select and reorder to match standing channels
 
@@ -189,20 +214,30 @@ for subject in SUBJECTS:
             if crop > 0:
                 power = power[..., crop:-crop]
 
-            # Resample power time axis to N_POINTS using linear interpolation
-            n_t   = power.shape[-1]
-            x_old = np.linspace(0, 1, n_t)
-            x_new = np.linspace(0, 1, N_POINTS)
-            resampled = np.stack([
-                np.stack([np.interp(x_new, x_old, power[ch, f])
-                          for f in range(power.shape[1])])
-                for ch in range(power.shape[0])
-            ])   # (n_ch, n_freqs, N_POINTS)
+            # Full-event (4-segment) piecewise-linear time warp (src.ersp,
+            # shared with the multiverse pipeline). Locate this cycle's own
+            # LTO/LHS/RTO sample positions within the (edge-cropped) power
+            # array, crop-adjusted the same way as `power` above.
+            row     = cycles_meta.iloc[i]
+            i_start_samp = int(round(float(row["rhs_start_s"]) * gait_sfreq))
+            lto_idx = int(round(float(row["lto_s"]) * gait_sfreq)) - i_start_samp - crop
+            lhs_idx = int(round(float(row["lhs_s"]) * gait_sfreq)) - i_start_samp - crop
+            rto_idx = int(round(float(row["rto_s"]) * gait_sfreq)) - i_start_samp - crop
+
+            try:
+                resampled = warp_cycle_to_grid(
+                    power, lto_idx, lhs_idx, rto_idx,
+                    anchors=(A_lto, A_lhs, A_rto), n_points=N_POINTS,
+                )   # (n_ch, n_freqs, N_POINTS)
+            except ValueError:
+                n_rej_evt += 1
+                continue
 
             tfr_cycles.append(resampled)
 
-        print(f"  Gait cycles rejected by amplitude: {n_rej}")
-        print(f"  Gait cycles accepted             : {len(tfr_cycles)}")
+        print(f"  Gait cycles rejected by amplitude    : {n_rej}")
+        print(f"  Gait cycles rejected by event order  : {n_rej_evt}")
+        print(f"  Gait cycles accepted                 : {len(tfr_cycles)}")
 
         if len(tfr_cycles) == 0:
             print("  No gait cycles survived -- skipping subject.")
@@ -256,77 +291,44 @@ for subject in SUBJECTS:
         print(f"  Linear ROI mean: {roi_mean_weighted:+.2f} dB  "
               f"(center=Cz)")
 
-        # --- Phase ERSP (stance vs swing) ---
+        # --- Phase ERSP (double stance vs swing), event-anchored ---
 
-        # Per-cycle stance/swing split based on RTO timing.
-        # For a right-foot cycle (RHS-to-RHS), stance ends at RTO.
-        # Split point is computed as fraction of cycle duration, then
-        # mapped to the 101-point normalized time axis.
-        # This respects intra-individual variability in stance/swing ratio
-        # rather than assuming a fixed 60/40 split.
-        # See: Kline et al. 2022 J Neurophysiol; Handford et al. 2022 Gait Posture
-        cycles_meta = pd.read_csv(
-            GAITEPOCH_DIR / f"sub-{subject}_cycles_kept.tsv", sep="\t"
+        # Because every cycle was warped above so that its own LTO/LHS/RTO
+        # land exactly at the group-median anchors (A_lto/A_lhs/A_rto),
+        # phase windows are now fixed index ranges on the common 101-point
+        # grid -- the same ranges for every cycle and every subject.
+        # Double support occurs twice per gait cycle (initial DS right
+        # after RHS, ending at LTO; terminal DS right after LHS, ending
+        # at RTO); swing likewise occurs twice (right swing LTO->LHS,
+        # left swing RTO->RHS). See: Perry & Burnfield, Gait Analysis:
+        # Normal and Pathological Function, 2nd ed., Ch. 1.
+        double_stance_idx, swing_idx = phase_split_indices(
+            (A_lto, A_lhs, A_rto), n_points=N_POINTS
         )
-        rto_fracs = (
-            (cycles_meta["rto_s"] - cycles_meta["rhs_start_s"]) /
-            (cycles_meta["rhs_end_s"] - cycles_meta["rhs_start_s"])
-        ).values  # shape: (n_cycles,)
 
-        # Clip to valid range -- rto_frac should be in (0.3, 0.8) for normal gait
-        rto_fracs = np.clip(rto_fracs, 0.3, 0.8)
+        print(f"  Phase windows (event-anchored, % of gait cycle): "
+              f"DS1=[0,{A_lto:.1f}]  SW1=[{A_lto:.1f},{A_lhs:.1f}]  "
+              f"DS2=[{A_lhs:.1f},{A_rto:.1f}]  SW2=[{A_rto:.1f},100]")
 
-        # Convert fraction to index in 101-point axis
-        rto_indices = np.round(rto_fracs * (N_POINTS - 1)).astype(int)  # per cycle
-
-        print(f"  RTO fraction: mean={rto_fracs.mean():.3f}  "
-              f"std={rto_fracs.std():.3f}  "
-              f"range=[{rto_fracs.min():.3f}, {rto_fracs.max():.3f}]")
-
-        # Guard: cycles_kept.tsv must match ersp_per_cycle cycle count.
-        # Both ana04 and ana05 apply AMP_THRESH=350e-6 to the same segments,
-        # so counts should always match. Raise early if they diverge.
-        if len(cycles_meta) != ersp_per_cycle.shape[0]:
-            raise RuntimeError(
-                f"cycles_kept.tsv has {len(cycles_meta)} rows but ersp_per_cycle has "
-                f"{ersp_per_cycle.shape[0]} cycles -- amplitude rejection mismatch."
-            )
-
-        # For each cycle, average ERSP over stance samples (0 to rto_idx)
-        # and swing samples (rto_idx to N_POINTS).
-        # Average across cycles after phase separation.
+        # For each cycle, average ERSP over the double-stance samples and
+        # over the swing samples, then average across cycles.
         # Shape of each: (n_ch, n_freqs)
-        double_stance_ersp_per_cycle = np.stack([
-            ersp_per_cycle[k, :, :, :rto_indices[k]].mean(axis=-1)
-            for k in range(len(rto_indices))
-        ])  # (n_cycles, n_ch, n_freqs)
-
-        swing_ersp_per_cycle = np.stack([
-            ersp_per_cycle[k, :, :, rto_indices[k]:].mean(axis=-1)
-            for k in range(len(rto_indices))
-        ])  # (n_cycles, n_ch, n_freqs)
+        double_stance_ersp_per_cycle = ersp_per_cycle[:, :, :, double_stance_idx].mean(axis=-1)
+        swing_ersp_per_cycle         = ersp_per_cycle[:, :, :, swing_idx].mean(axis=-1)
 
         ersp_double_stance = double_stance_ersp_per_cycle.mean(axis=0)  # (n_ch, n_freqs)
         ersp_swing         = swing_ersp_per_cycle.mean(axis=0)          # (n_ch, n_freqs)
 
-        _pi     = lambda pct: int(round(pct / 100 * (N_POINTS - 1)))
-        _ds_idx = np.concatenate([np.arange(_pi(s), _pi(e)) for s, e in DOUBLE_STANCE_WINDOWS])
-        _sw_idx = np.concatenate([np.arange(_pi(s), _pi(e)) for s, e in SWING_WINDOWS])
-        _smx    = [stand_ch_names.index(c) for c in ['Cz', 'C3', 'C4'] if c in stand_ch_names]
+        _smx = [stand_ch_names.index(c) for c in ['Cz', 'C3', 'C4'] if c in stand_ch_names]
         print(f"  Double stance ERSP (segment, sensorimotor mean): "
-              f"{ersp_avg[_smx][:, :, _ds_idx].mean():+.2f} dB")
+              f"{ersp_avg[_smx][:, :, double_stance_idx].mean():+.2f} dB")
         print(f"  Swing         ERSP (segment, sensorimotor mean): "
-              f"{ersp_avg[_smx][:, :, _sw_idx].mean():+.2f} dB")
+              f"{ersp_avg[_smx][:, :, swing_idx].mean():+.2f} dB")
 
         np.save(ERSP_DIR / f"sub-{subject}_ersp_double_stance.npy", ersp_double_stance)
         np.save(ERSP_DIR / f"sub-{subject}_ersp_swing.npy",         ersp_swing)
         print(f"  Saved -> sub-{subject}_ersp_double_stance.npy  shape={ersp_double_stance.shape}")
         print(f"  Saved -> sub-{subject}_ersp_swing.npy           shape={ersp_swing.shape}")
-
-        pd.DataFrame({
-            "rto_frac": rto_fracs,
-            "rto_idx":  rto_indices
-        }).to_csv(ERSP_DIR / f"sub-{subject}_rto_fracs.csv", index=False)
 
         out = ERSP_DIR / f"sub-{subject}_ersp_beta.npy"
         np.save(out, ersp_avg)
