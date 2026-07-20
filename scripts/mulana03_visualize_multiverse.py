@@ -32,18 +32,3 @@ mverse.specification_curve(
     height_ratio = [1, 1],
     ftype        = "pdf",
 )
-
-# --- Multiverse density plot ---
-name_map_density = {
-    "t_stats":        "Subject beta contrast\n(double stance - swing, dB)",
-    "highpass_hz":    "High-pass (Hz)",
-    "asr_mode":       "ASR",
-    "iclabel_rule":   "IC selection",
-}
-
-mverse.multiverse_plot(
-    measure  = "group_t_mean",
-    n_bins   = 4,
-    name_map = name_map_density,
-    baseline = 0,
-)
