@@ -1,6 +1,6 @@
 # Multiverse Analysis of Beta Activity During Gait
 
-A modular EEG analysis pipeline investigating **beta-band cortical activity (~13–30 Hz)** across the gait cycle, focused on **double-stance vs swing** phase dynamics. The project uses a **multiverse analysis** framework to quantify how preprocessing decisions affect neural results, and tests robustness across **two independent datasets** (treadmill and overground walking).
+A modular EEG analysis pipeline investigating **beta-band cortical activity (~13–30 Hz)** across the gait cycle, focused on **double-stance vs swing** phase dynamics. The project uses a **multiverse analysis** framework to quantify how preprocessing decisions affect neural results, and tests robustness across **two independent datasets** (treadmill and overground walking), from two different labs.
 
 > The repository is under active development; scripts and parameters may evolve as the methodology is refined.
 
@@ -24,7 +24,7 @@ This project investigates:
 
 The pipeline is **dataset-agnostic**: the same reference pipeline and multiverse run on either dataset, selected via a per-dataset config. Dataset-specific differences (loader, montage, event source, baseline) are isolated in config files; all analysis logic is shared.
 
-### 1. stepUpAms — treadmill (`datasets/stepup/`)
+### 1. StepuPAms — treadmill (`datasets/stepup/`)
 
 Mobile EEG during split-belt treadmill walking. BrainVision format, BIDS. Two recordings per subject: `task-STAND` (standing baseline) and `task-CS` (constant-speed walking). Gait events from motion capture (RHS / LHS / RTO / LTO). ~18 subjects.
 
@@ -253,17 +253,17 @@ gantt
     section Reference Pipeline
     Pipeline build (dataset 1)         :done, b1, 2026-02-10, 90d
     Full-event warp + group stats      :done, b2, 2026-06-01, 30d
-    Pipeline on dataset 2              :active, b3, 2026-07-10, 20d
+    Pipeline on dataset 2              :active, b3, 2026-07-10, 15d
 
     section Multiverse
     Define decision nodes (literature) :done, d1, 2026-03-11, 120d
     Run multiverse (dataset 1)         :done, d2, 2026-07-01, 15d
-    Run multiverse (dataset 2)         :d3, after b3, 20d
-    Compare across datasets            :d4, after d3, 15d
+    Run multiverse (dataset 2)         :d3, after b3, 5d
+    Compare across datasets            :d4, after d3, 5d
 
     section Manuscript
-    Figures & statistics               :e1, 2026-08-15, 21d
-    Writing                            :e2, after e1, 35d
+    Figures & statistics               :e1, 2026-07-15, 21d
+    Writing                            :e2, after b2, 60d
 ```
 
 ---
