@@ -1,31 +1,53 @@
+"""
+Active-dataset selector + dataset-agnostic canonical pipeline settings.
+
+Set ACTIVE_DATASET below, or the BETAGAIT_DATASET environment variable,
+to "stepup" or "jacobsen" to choose which per-dataset config
+(src/config_stepup.py or src/config_jacobsen.py) the whole pipeline
+uses. Every attribute of the selected module is re-exported from here,
+so existing `from src.config import DATASET, SUBJECTS, ...` imports
+throughout scripts/ and src/ keep working unchanged -- switching
+datasets never requires touching scripts/ or src/pipeline_steps.py,
+only this constant (or the env var).
+"""
+
+import os
 from pathlib import Path
 
-# Active dataset and subject list.
-# Change DATASET to switch between "stepup" and "splitbelt".
-# SUBJECTS will be expanded to the full cohort before batch processing.
-DATASET  = "stepup"   # active dataset key
-SUBJECTS = [
-    "S1", "S2", "S3", "S4", "S7", "S9", "S10", "S11",
-    "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S20", "S21", "S23",
-]  # full cohort
+from src import config_stepup, config_jacobsen
 
-# Subjects for multiverse analysis.
-# Excluded:
-#   S10 — ICA failure: 1/38 brain ICs (brain_frac=0.026), signal quality insufficient
-#   S21 — AutoReject failure: only 12/243 clean epochs, extreme artifact contamination (bad P1)
-#   S2 — AutoReject failure with only 12/243 clean epochs.
-MULTIVERSE_SUBJECTS = [
-    "S1", "S3", "S4", "S7", "S9", "S11",
-    "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S20", "S23",
-]
+ACTIVE_DATASET = os.environ.get("BETAGAIT_DATASET", "stepup")
 
-# --- Canonical pipeline ASR settings ---
+_PER_DATASET = {
+    "stepup":   config_stepup,
+    "jacobsen": config_jacobsen,
+}
+
+if ACTIVE_DATASET not in _PER_DATASET:
+    raise ValueError(
+        f"Unknown ACTIVE_DATASET {ACTIVE_DATASET!r} -- "
+        f"expected one of {sorted(_PER_DATASET)}"
+    )
+
+_active = _PER_DATASET[ACTIVE_DATASET]
+
+# Re-export every public attribute of the active per-dataset config
+# (DATASET, SUBJECTS, MULTIVERSE_SUBJECTS, EEG_FORMAT, EVENT_SOURCE,
+# and whatever dataset-specific extras it defines) so `from src.config
+# import <name>` works uniformly regardless of which dataset is active.
+for _name in dir(_active):
+    if not _name.startswith("_"):
+        globals()[_name] = getattr(_active, _name)
+del _name
+
+# --- Canonical pipeline settings (dataset-agnostic) ---
 # ASR (Artifact Subspace Reconstruction) is applied after bad-channel
 # interpolation and before average reference.
 # Set USE_ASR = True to enable in the canonical pipeline.
 # Default is False: ASR attenuated the stance/swing beta difference
-# in the multiverse analysis (group t: 1.80 → 0.60), so the canonical
-# pipeline uses the more conservative non-ASR result.
+# in the multiverse analysis (group t: 1.80 → 0.60) on stepUpAms, so the
+# canonical pipeline uses the more conservative non-ASR result by
+# default for every dataset.
 # See: Mullen et al. 2015 IEEE TBME; Gorjan et al. 2022 J Neural Eng
 USE_ASR    = False
 ASR_CUTOFF = 30.0   # SD threshold; 20-30 recommended for walking EEG
@@ -34,12 +56,13 @@ MULTIVERSE_NAME = "beta_gait_multiverse"
 
 
 def define_dir(root, *names):
-    """Creates a directory and ensures it exists."""
+    """Create a directory (parents included) and return it as a Path."""
     path = root
     for name in names:
         path = path / name
     path.mkdir(parents=True, exist_ok=True)
     return path
+
 
 # Get the root directory of the repository (parent of 'src')
 DIR_PROJ = Path(__file__).resolve().parents[1]
@@ -48,55 +71,41 @@ DIR_PROJ = Path(__file__).resolve().parents[1]
 DIR_DATASETS = define_dir(DIR_PROJ, "datasets")
 DIR_SCRIPTS  = define_dir(DIR_PROJ, "scripts")
 DIR_RESULTS  = define_dir(DIR_PROJ, "results")
-DIR_PLOTS = define_dir(DIR_RESULTS, "pipeline", "plots")
-DIR_QC    = define_dir(DIR_RESULTS, "pipeline", "qc")
-DIR_MULTIVERSE          = define_dir(DIR_RESULTS, "multiverse")
-DIR_MULTIVERSE_OUTPUTS  = define_dir(DIR_RESULTS, "multiverse", "outputs")
-DIR_MULTIVERSE_BRANCHES = define_dir(DIR_RESULTS, "multiverse", "branches")
 
-# Dataset-specific directories will be defined in the DATASETS dict below, which allows for flexible handling of multiple datasets with different structures
+# Group-level pipeline outputs (prepana06's group figure, prepana07's
+# group stats, qc_summary.py's aggregated tables) are nested per active
+# dataset -- two datasets share the same scripts, but each dataset's
+# group-level results must not overwrite the other's.
+DIR_PLOTS = define_dir(DIR_RESULTS, "pipeline", ACTIVE_DATASET, "plots")
+DIR_QC    = define_dir(DIR_RESULTS, "pipeline", ACTIVE_DATASET, "qc")
+
+# Multiverse outputs (branch ICA cache, COMET's internal working
+# directory, final outputs/pkl) are nested per active dataset -- same
+# rationale as DIR_PLOTS/DIR_QC above: two datasets share the same
+# multiverse scripts, but their branch caches and results must never
+# collide or silently overwrite one another.
+DIR_MULTIVERSE          = define_dir(DIR_RESULTS, "multiverse", ACTIVE_DATASET)
+DIR_MULTIVERSE_OUTPUTS  = define_dir(DIR_MULTIVERSE, "outputs")
+DIR_MULTIVERSE_BRANCHES = define_dir(DIR_MULTIVERSE, "branches")
+
+# COMET's own working directory (generated universe_N.py scripts + its
+# raw multiverse_results.pkl / multiverse_summary.csv). Passed
+# explicitly as Multiverse(path=str(DIR_MULTIVERSE_COMET)) in
+# mulana01/02/03 so COMET never falls back to its default
+# calling-script-relative location (which is not dataset-aware and was
+# the original source of this collision -- see comet.multiverse.
+# Multiverse.__init__).
+DIR_MULTIVERSE_COMET    = define_dir(DIR_MULTIVERSE, "comet")
+
+# Per-dataset directory trees, keyed for src.paths.get_dataset_dirs().
+# Built for every known dataset (not just the active one) so
+# get_dataset_dirs("stepup") / get_dataset_dirs("jacobsen") both resolve
+# regardless of ACTIVE_DATASET -- e.g. useful for one-off cross-dataset
+# scripts or tests.
 DATASETS = {
-
-    "splitbelt": {
-        "root": define_dir(DIR_DATASETS, "splitBeltFerris"),
-
-        # pipeline structure
-        "dirs": {
-            "raw":        "d00_raw",
-            "montage":    "d00_montage",
-            "seg":        "d01_segmented",
-            "sigclean":   "d02_sigclean",
-            "preica":     "d03_preica",
-            "ica":        "d04_ica",
-            "gait_cycles":       "d05_gaitcycles",
-            "tfr":        "d06_tfr",
-            "ersp":       "d07_ersp",
-        },
-
-        # dataset-specific parameters
-        "event_file": "eeg/sub-{sub}_task-task_events.tsv",
-        "condition_start": "B3",
-        "condition_end": "End B3",
-    },
-
-
-    "stepup": {
-        "root": define_dir(DIR_DATASETS, "stepupAms"),
-
-        "dirs": {
-            "qc":         "d00_qc",
-            "raw":        "d00_raw",
-            "gait_events":"d01_gaitevents",
-
-            "prep":    "d02_prep",
-
-            "clean":      "d03_clean",
-            "gaitepochs":        "d04_gaitepochs",
-            "ersp":       "d05_ersp",
-            "roi_topo":   "d05_roi_topo",   # Gaussian ROI weight topographies
-        },
-
-        "event_file": "events/{sub}.tsv"
-    },
-
+    dataset_name: {
+        "root": define_dir(DIR_DATASETS, mod.ROOT_DIRNAME),
+        "dirs": mod.DIRS,
+    }
+    for dataset_name, mod in _PER_DATASET.items()
 }
