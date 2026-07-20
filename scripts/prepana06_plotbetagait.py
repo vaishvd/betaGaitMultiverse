@@ -32,6 +32,7 @@ from pathlib import Path
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS, DIR_PLOTS
 from src.spatial_filter import linear_roi_weights, apply_linear_roi
+from src.ersp import load_group_anchors
 
 FREQS      = np.arange(8, 41)
 ERSP_CLIM  = 4.0
@@ -48,6 +49,12 @@ ERSP_DIR      = dirs["ersp"]
 CLEAN_DIR     = dirs["clean"]
 GAITEPOCH_DIR = dirs["gaitepochs"]
 PLOTS_DIR     = Path(DIR_PLOTS)
+
+# Group-median gait-event anchors, written once by prepana05 (same values
+# used there to warp every cycle onto the common grid). Loaded rather than
+# recomputed here so the plotted event lines always match the anchors the
+# ERSP arrays were actually warped to.
+A_lto, A_lhs, A_rto = load_group_anchors(ERSP_DIR)
 
 ersp_list    = []
 topo_list    = []   # per-subject (n_ch,) ERSP averaged over freqs & time
@@ -106,10 +113,9 @@ if len(ersp_list) == 0:
 # Group average ERSP
 ersp_group = np.mean(np.stack(ersp_list), axis=0)  # (n_freqs, 101)
 
-# Group mean gait events
-mean_lto_group = float(np.mean([e[0] for e in events_list]))
-mean_lhs_group = float(np.mean([e[1] for e in events_list]))
-mean_rto_group = float(np.mean([e[2] for e in events_list]))
+# Group gait-event positions -- the shared group-median anchors from
+# prepana05 (every cycle was warped to land exactly on these percentages).
+mean_lto_group, mean_lhs_group, mean_rto_group = A_lto, A_lhs, A_rto
 
 n_subjects = len(ersp_list)
 
