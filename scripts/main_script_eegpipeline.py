@@ -1,7 +1,7 @@
 """
 Main pipeline to load and analyze EEG data.
 
-Runs all six canonical pipeline stages in sequence for all subjects
+Runs all seven canonical pipeline stages in sequence for all subjects
 defined in src/config.SUBJECTS.
 
 Individual stages are implemented in prepanaXX_*.py scripts, which arealled by this main script. Each stage is designed to be runnable
@@ -16,12 +16,13 @@ import time
 from src.config import SUBJECTS, DATASET, DIR_SCRIPTS
 
 STAGES = [
-    (1, "prepana01_prep_gaitevents.py",  "gait event detection"),
-    (2, "prepana02_raw2ica.py",          "preprocessing + ICA fit"),
-    (3, "prepana03_ica2clean.py",        "ICLabel + ICA apply"),
-    (4, "prepana04_clean2gaitcycles.py", "gait segment extraction"),
-    (5, "prepana05_gaitcycles2tfr.py",   "TFR + ERSP"),
-    (6, "prepana06_plotbetagait.py",     "group ERSP figure"),
+    (1, "prepana01_prep_gaitevents.py",     "gait event detection"),
+    (2, "prepana02_raw2ica.py",             "preprocessing + ICA fit"),
+    (3, "prepana03_ica2clean.py",           "ICLabel + ICA apply"),
+    (4, "prepana04_clean2gaitcycles.py",    "gait segment extraction"),
+    (5, "prepana05_gaitcycles2tfr.py",      "TFR + ERSP"),
+    (6, "prepana06_plotbetagait.py",        "group ERSP figure"),
+    (7, "prepana07_betaphase_stats.py",     "beta phase group t-test"),
 ]
 
 print(f"Dataset  : {DATASET}")
@@ -33,7 +34,7 @@ t_total = time.time()
 for stage_num, script_name, description in STAGES:
     script = DIR_SCRIPTS / script_name
     print(f"\n{'='*60}")
-    print(f"Stage {stage_num}/6 — {description}")
+    print(f"Stage {stage_num}/7 — {description}")
     print(f"{'='*60}")
 
     t0 = time.time()
