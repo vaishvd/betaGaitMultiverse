@@ -16,17 +16,34 @@ def apply_gedai_node(
     apply: bool = True,
     duration: float = 2.0,
     overlap: float = 0.5,
-    noise_multiplier: float = 3.0,
+    broadband_noise_multiplier: float = 6.0,
+    spectral_noise_multiplier: float = 3.0,
+    wavelet_type: str = "haar",
+    wavelet_level: int = 5,
+    wavelet_low_cutoff: float = 2.0,
     sensai_method: str = "optimize",
 ) -> mne.io.BaseRaw:
     """
-    Optionally apply GEDAI to a preprocessed raw recording.
+    Optionally apply two-stage GEDAI to a preprocessed raw recording.
 
-    GEDAI (Hecker et al. 2024, neurotuning.github.io/gedai) uses
-    generalized eigenvalue decomposition with a leadfield reference
-    covariance to suppress non-brain artifacts while preserving
-    neural signal structure. Applied after bad-channel interpolation
-    and before average re-referencing.
+    Implements the recommended two-stage GEDAI pipeline per the official
+    GEDAI spectral tutorial (neurotuning.github.io/gedai):
+
+      Stage 1 — broadband, conservative (noise_multiplier=6.0):
+        Fits a single broadband Gedai instance to remove only large
+        artifacts. High noise_multiplier preserves neural signal.
+
+      Stage 2 — spectral, band-specific (Haar wavelet, level 5):
+        Fits a second Gedai instance on the stage-1 output using
+        frequency-band decomposition, allowing fine-grained removal
+        of band-limited artifacts while leaving oscillatory signal
+        intact. Epoch duration/overlap are omitted (auto-adjusted
+        internally by the spectral fit).
+
+    Applied after bad-channel interpolation and before average
+    re-referencing. Montage is temporarily projected to standard 10-20
+    for leadfield covariance compatibility, then original channel info
+    is restored.
 
     Parameters
     ----------
@@ -34,23 +51,29 @@ def apply_gedai_node(
         Preprocessed, filtered, bad-channel-interpolated raw
         (pre-reference). Must be preloaded.
     apply : bool
-        If True, fit and apply GEDAI. If False, return raw unchanged
-        (the skip branch of the decision node).
+        If True, run the two-stage pipeline. If False, return raw
+        unchanged (the skip branch of the decision node).
     duration : float
-        Epoch duration in seconds used for covariance estimation.
+        Epoch duration in seconds for broadband stage covariance.
     overlap : float
-        Epoch overlap fraction (0–1).
-    noise_multiplier : float
-        Threshold multiplier for component rejection (higher = less
-        aggressive). Default 3.0.
+        Epoch overlap fraction (0-1) for broadband stage.
+    broadband_noise_multiplier : float
+        Rejection threshold for stage 1 (conservative). Default 6.0.
+    spectral_noise_multiplier : float
+        Rejection threshold for stage 2 (band-specific). Default 3.0.
+    wavelet_type : str
+        Wavelet family for stage-2 decomposition. Default "haar".
+    wavelet_level : int
+        Decomposition depth for stage-2. Default 5.
+    wavelet_low_cutoff : float
+        Low-frequency cutoff (Hz) for stage-2 wavelet bands. Default 2.0.
     sensai_method : str
-        Method for selecting the regularisation parameter.
-        "gridsearch" (default) or "fixed".
+        Regularisation selection method for both stages. Default "optimize".
 
     Returns
     -------
     mne.io.BaseRaw
-        GEDAI-cleaned raw if apply=True, else the input raw unchanged.
+        Two-stage GEDAI-cleaned raw if apply=True, else input unchanged.
     """
     if not apply:
         print("  GEDAI skipped (apply=False)")
@@ -79,24 +102,37 @@ def apply_gedai_node(
         print(f"  GEDAI: interpolated {len(non_1020)} non-10-20 "
               f"channel(s) for montage compatibility")
 
-    # ── Fit and transform ───────────────────────────────────────
-    gedai = Gedai()
-    gedai.fit_raw(
+    # ── Stage 1: broadband, conservative ───────────────────────
+    gedai_bb = Gedai()
+    gedai_bb.fit_raw(
         raw_work,
         duration=duration,
         overlap=overlap,
         reject_by_annotation=False,
         reference_cov="leadfield",
         sensai_method=sensai_method,
-        noise_multiplier=noise_multiplier,
+        noise_multiplier=broadband_noise_multiplier,
         verbose=False,
     )
-    raw_work_clean = gedai.transform_raw(
-        raw_work,
-        duration=duration,
-        overlap=overlap,
+    raw_bb = gedai_bb.transform_raw(
+        raw_work, duration=duration, overlap=overlap, verbose=False
+    )
+
+    # ── Stage 2: spectral, band-specific ───────────────────────
+    gedai_sp = Gedai(
+        wavelet_type=wavelet_type,
+        wavelet_level=wavelet_level,
+        wavelet_low_cutoff=wavelet_low_cutoff,
+    )
+    gedai_sp.fit_raw(
+        raw_bb,
+        reject_by_annotation=False,
+        reference_cov="leadfield",
+        sensai_method=sensai_method,
+        noise_multiplier=spectral_noise_multiplier,
         verbose=False,
     )
+    raw_work_clean = gedai_sp.transform_raw(raw_bb, verbose=False)
 
     # ── Restore original channel info ───────────────────────────
     # Copy cleaned data back into the original raw object so
@@ -104,11 +140,20 @@ def apply_gedai_node(
     raw_clean = raw.copy()
     raw_clean._data[:] = raw_work_clean.get_data()
 
-    n_bands = len(gedai.wavelets_fits)
-    thresholds = ", ".join(
-        f"{wf['fmin']:.0f}-{wf['fmax']:.0f} Hz "
-        f"(thr={wf['threshold']:.3f})"
-        for wf in gedai.wavelets_fits
-    )
-    print(f"  GEDAI applied: {n_bands} band(s) — {thresholds}")
+    try:
+        n_bb = len(gedai_bb.wavelets_fits)
+        bb_str = ", ".join(
+            "%d-%d Hz (thr=%.3f)" % (wf["fmin"], wf["fmax"], wf["threshold"])
+            for wf in gedai_bb.wavelets_fits
+        )
+        n_sp = len(gedai_sp.wavelets_fits)
+        sp_str = ", ".join(
+            "%d-%d Hz (thr=%.3f)" % (wf["fmin"], wf["fmax"], wf["threshold"])
+            for wf in gedai_sp.wavelets_fits
+        )
+        print("  GEDAI stage-1 broadband: %d band(s) -- %s" % (n_bb, bb_str))
+        print("  GEDAI stage-2 spectral : %d band(s) -- %s" % (n_sp, sp_str))
+    except AttributeError:
+        print("  GEDAI two-stage applied (band details unavailable)")
+
     return raw_clean
