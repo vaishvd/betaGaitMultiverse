@@ -7,17 +7,17 @@ to have completed successfully.
 """
 
 from comet.multiverse import Multiverse
-from src.config import MULTIVERSE_NAME
+from src.config import MULTIVERSE_NAME, DIR_MULTIVERSE_COMET
 
-mverse = Multiverse(name=MULTIVERSE_NAME)
+# path= must match mulana01's -- see src.config.DIR_MULTIVERSE_COMET.
+mverse = Multiverse(name=MULTIVERSE_NAME, path=str(DIR_MULTIVERSE_COMET))
 
 # --- Specification curve ---
 name_map = {
-    "t_stats":        "Subject t-statistics\n(double stance vs swing\nbeta power)",
-    "use_asr":        "ASR\ndenoising",
-    "use_gedai":      "GEDAI\ndenoising",
-    "baseline_type":  "Baseline\ntype",
-    "brain_thresh":   "ICLabel\nthreshold",
+    "t_stats":        "Subject beta contrast\n(double stance - swing, dB)",
+    "highpass_hz":    "High-pass (Hz)",
+    "asr_mode":       "ASR",
+    "iclabel_rule":   "IC selection",
 }
 
 mverse.specification_curve(
@@ -35,11 +35,10 @@ mverse.specification_curve(
 
 # --- Multiverse density plot ---
 name_map_density = {
-    "t_stats":        "Subject t-statistics\n(double stance vs swing\nbeta power)",
-    "use_asr":        "ASR\ndenoising",
-    "use_gedai":      "GEDAI\ndenoising",
-    "baseline_type":  "Baseline\ntype",
-    "brain_thresh":   "ICLabel\nthreshold",
+    "t_stats":        "Subject beta contrast\n(double stance - swing, dB)",
+    "highpass_hz":    "High-pass (Hz)",
+    "asr_mode":       "ASR",
+    "iclabel_rule":   "IC selection",
 }
 
 mverse.multiverse_plot(

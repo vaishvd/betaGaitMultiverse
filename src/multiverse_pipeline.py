@@ -1,36 +1,60 @@
 """
 Single-subject multiverse pipeline for betaGaitMultiverse.
+
+Three decision nodes (highpass_hz, asr_mode, iclabel_rule). Computes the
+same event-anchored double-stance-vs-swing beta contrast as the
+canonical pipeline (prepana05_gaitcycles2tfr.py + prepana07_betaphase_
+stats.py), reusing the shared warp/phase/beta-reduction logic from
+src/ersp.py so both pipelines stay numerically identical when settings
+match.
 """
 
 import numpy as np
 import pandas as pd
 import mne
 from pathlib import Path
-from scipy.stats import ttest_rel
+from autoreject import AutoReject
 
 from src.config import DATASET, DIR_MULTIVERSE_BRANCHES
 from src.paths import get_dataset_dirs
-from src.pipeline_steps import load_and_concatenate, preprocess_raw, fit_ica
-from src.spatial_filter import linear_roi_weights, apply_linear_roi
+from src.preprocessing import drop_invalid_eeg_channels
+from src.pipeline_steps import load_and_concatenate, preprocess_raw, apply_ica
+from src.ica_utils import run_ica, iclabel_probabilities, select_ics_by_rule
+from src.spatial_filter import linear_roi_weights
+from src.ersp import (
+    load_group_anchors,
+    warp_cycle_to_grid,
+    phase_split_indices,
+    compute_standing_baseline,
+    beta_roi_scalar,
+)
 
-TARGET_SFREQ = 250
 AMP_THRESH   = 350e-6
 FREQS        = np.arange(8, 41, dtype=float)
 N_CYCLES_WAV = FREQS / 2.0
 N_POINTS     = 101
 EDGE_CROP    = 0.05
+EPOCH_DUR    = 2.0
+N_COMPONENTS = 0.99
+RANDOM_STATE = 42
 
-# Literature-based peak windows (confirmatory, not data-driven)
-# Double stance ERS at heel contact: Petersen et al. 2012 J Physiol
-# Swing ERD: Bulea et al. 2015 Front Hum Neurosci;
-#            Seeber et al. 2015 Front Hum Neurosci
-DOUBLE_STANCE_WINDOWS = [(0, 20), (50, 70)]
-SWING_WINDOWS         = [(20, 50), (70, 100)]
+# ASR cutoff (SD threshold) per asr_mode. Higher cutoff = more lenient:
+# asrpy/meegkit express the burst threshold directly as a multiple of the
+# calibration data's clean-window SD, so a larger multiplier tolerates
+# larger deviations before correcting them (see src/nodes/asr_node.py
+# and Gorjan et al. 2022, who recommend 20-30 for walking EEG).
+ASR_CUTOFF_BY_MODE = {"sd3": 3.0, "sd20": 20.0}
 
 
 def _branch_dir(subject: str, decisions: dict) -> Path:
-    """Subdirectory keyed on ICA-relevant decisions only."""
-    ica_keys = {"use_asr", "use_gedai", "brain_thresh", "highpass_hz", "lowpass_hz"}
+    """
+    Subdirectory keyed on ICA-relevant decisions only (highpass_hz,
+    asr_mode, lowpass_hz). iclabel_rule is deliberately excluded: all
+    three ICLabel rules are applied on top of the SAME cached ICA fit
+    and ICLabel run, so this key gives 3 x 3 = 9 unique branches per
+    subject instead of 27.
+    """
+    ica_keys = {"highpass_hz", "asr_mode", "lowpass_hz"}
     parts = "_".join(
         f"{k}-{decisions[k]}"
         for k in sorted(ica_keys)
@@ -41,77 +65,141 @@ def _branch_dir(subject: str, decisions: dict) -> Path:
     return d
 
 
+def _fit_or_load_ica(raw, subject, branch_dir):
+    """
+    Fit ICA + run ICLabel once per (highpass_hz, asr_mode, lowpass_hz)
+    branch, or load the cached fit/probabilities if already computed.
+
+    Duplicates the AutoReject-epoching step from
+    src.pipeline_steps.fit_ica() rather than calling it directly: that
+    function bundles fitting with applying a single exclusion set and
+    caches 1:1 on iclean_path, whereas here one ICA fit + ICLabel run
+    must be reused across three different exclusion rules (see
+    _branch_dir). The actual exclusion + apply step below reuses
+    src.pipeline_steps.apply_ica() unchanged.
+
+    Returns
+    -------
+    ica   : fitted mne.preprocessing.ICA (exclude not yet set)
+    probs : ndarray, shape (n_components, 7) -- ICLabel class probabilities
+    """
+    ica_path   = branch_dir / f"sub-{subject}_ica.fif"
+    probs_path = branch_dir / f"sub-{subject}_iclabel_probs.npy"
+
+    if ica_path.exists() and probs_path.exists():
+        ica   = mne.preprocessing.read_ica(ica_path, verbose=False)
+        probs = np.load(probs_path)
+        return ica, probs
+
+    epochs_raw = mne.make_fixed_length_epochs(
+        raw, duration=EPOCH_DUR, preload=True, verbose=False
+    )
+    epochs_raw.pick("eeg")
+    drop_invalid_eeg_channels(epochs_raw)
+
+    ar = AutoReject(n_interpolate=[1, 2, 4], random_state=RANDOM_STATE, verbose=False)
+    ar.fit(epochs_raw)
+    epochs_clean, _ = ar.transform(epochs_raw, return_log=True)
+
+    if len(epochs_clean) < 20:
+        raise RuntimeError(f"sub-{subject}: only {len(epochs_clean)} clean epochs")
+
+    ica = run_ica(
+        epochs_clean,
+        n_components=N_COMPONENTS,
+        method="infomax",
+        fit_params=dict(extended=True),
+        random_state=RANDOM_STATE,
+    )
+    probs, _ = iclabel_probabilities(ica, epochs_clean)
+
+    ica.save(ica_path, overwrite=True, verbose=False)
+    np.save(probs_path, probs)
+    return ica, probs
+
+
 def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
     """
     Run one analysis branch for one subject.
 
-    Returns a dict with t_stat and supporting metrics, or None on failure.
+    Parameters
+    ----------
+    decisions : dict with keys "highpass_hz" (float), "asr_mode"
+        ("off"/"sd3"/"sd20"), "iclabel_rule" ("conservative"/"balanced"/
+        "liberal"), "lowpass_hz" (float, fixed at 40.0 by the multiverse
+        template).
+
+    Returns
+    -------
+    dict with the per-subject double-stance/swing beta contrast, or
+    raises on failure (callers should catch and skip the subject).
     """
     dirs      = get_dataset_dirs(DATASET)
     raw_dir   = dirs["raw"]
     event_dir = dirs["gait_events"]
+    ersp_dir  = dirs["ersp"]
 
     branch_dir  = _branch_dir(subject, decisions)
-    ica_path    = branch_dir / f"sub-{subject}_ica.fif"
-    iclean_path = branch_dir / f"sub-{subject}_desc-icaClean_raw.fif"
+    iclabel_rule = decisions["iclabel_rule"]
+    iclean_path  = branch_dir / f"sub-{subject}_desc-icaClean_{iclabel_rule}_raw.fif"
 
-    # Preprocessing 
+    # Preprocessing -- identical call to the canonical pipeline
+    asr_mode   = decisions["asr_mode"]
+    use_asr    = asr_mode != "off"
+    asr_cutoff = ASR_CUTOFF_BY_MODE.get(asr_mode, 30.0)
+
     raw = load_and_concatenate(subject, raw_dir)
-    use_asr    = bool(decisions["use_asr"])
-    asr_cutoff = 30.0
     raw = preprocess_raw(
         raw, subject,
-        highpass_hz            = float(decisions["highpass_hz"]),
-        lowpass_hz             = decisions["lowpass_hz"],
-        use_asr                = use_asr,
-        asr_cutoff             = asr_cutoff,
-        use_gedai              = decisions.get("use_gedai", False),
-        gedai_noise_multiplier = float(decisions.get("gedai_noise_multiplier", 3.0)),
-    )
-    raw_clean, ica, n_brain = fit_ica(
-        raw, subject,
-        brain_thresh = float(decisions["brain_thresh"]),
-        ica_path     = ica_path,
-        iclean_path  = iclean_path,
+        highpass_hz = float(decisions["highpass_hz"]),
+        lowpass_hz  = float(decisions["lowpass_hz"]),
+        use_asr     = use_asr,
+        asr_cutoff  = asr_cutoff,
+        use_gedai   = False,
     )
 
-    # Crop segments 
+    # ICA: fit once per (highpass_hz, asr_mode, lowpass_hz) branch, cached;
+    # apply this universe's iclabel_rule on top without refitting.
+    ica, probs = _fit_or_load_ica(raw, subject, branch_dir)
+    exclude_ics = select_ics_by_rule(probs, iclabel_rule)
+    ica.exclude = exclude_ics
+    n_brain = ica.n_components_ - len(exclude_ics)
+
+    raw_clean = apply_ica(raw, ica, subject, iclean_path=iclean_path)
+
+    # Crop segments
     def crop(r, desc):
         ann = [a for a in r.annotations if a["description"] == desc][0]
         return r.copy().crop(ann["onset"],
                              min(ann["onset"] + ann["duration"], r.times[-1]))
 
-    raw_stand = crop(raw_clean, "STAND").crop(tmax=None)   # keep full
-    raw_walk  = crop(raw_clean, "CS")
-    sfreq     = raw_walk.info["sfreq"]
-
-    # Standing baseline 
-    if decisions["baseline_type"] == "standing":
-        epochs = mne.make_fixed_length_epochs(
-            raw_stand, duration=2.0, preload=True, verbose=False
+    raw_stand = crop(raw_clean, "STAND")
+    stand_tmax = raw_stand.times[-1] - 2.0   # trim boundary artefact, matches prepana05
+    if stand_tmax <= 0:
+        raise RuntimeError(
+            f"sub-{subject}: standing segment too short after trimming "
+            f"({raw_stand.times[-1]:.1f} s)"
         )
-        tfrs = []
-        for ep in epochs.get_data():
-            if np.max(np.abs(ep)) > AMP_THRESH:
-                continue
-            pw = mne.time_frequency.tfr_array_morlet(
-                ep[np.newaxis], sfreq=sfreq, freqs=FREQS,
-                n_cycles=N_CYCLES_WAV, output="power",
-                zero_mean=True, verbose=False
-            )[0]
-            c = int(EDGE_CROP * pw.shape[-1])
-            tfrs.append(pw[..., c:-c] if c else pw)
-        if not tfrs:
-            raise RuntimeError(f"sub-{subject}: no clean standing epochs")
-        baseline_power = np.stack(tfrs).mean(axis=(0, 3))   # (ch, freq)
-    else:
-        baseline_power = None   # computed from walking data
+    raw_stand = raw_stand.crop(tmax=stand_tmax)
 
-    #  Gait-cycle TFR 
+    raw_walk = crop(raw_clean, "CS")
+    sfreq    = raw_walk.info["sfreq"]
+
+    # Standing baseline -- fixed (canonical pipeline uses standing only;
+    # baseline_type is no longer a multiverse decision node)
+    baseline_power = compute_standing_baseline(
+        raw_stand, FREQS, N_CYCLES_WAV,
+        edge_crop=EDGE_CROP, amp_thresh=AMP_THRESH,
+    )
+
+    # Group-median gait-event anchors -- shared with the canonical pipeline
+    A_lto, A_lhs, A_rto = load_group_anchors(ersp_dir)
+
+    # Gait-cycle TFR + full-event (4-segment) time-warp
     cycles    = pd.read_csv(event_dir / f"sub-{subject}_cycles.tsv", sep="\t")
     walk_data = raw_walk.get_data()
 
-    tfr_cycles, rto_fracs = [], []
+    tfr_cycles = []
     for _, row in cycles.iterrows():
         i0 = int(round(row["rhs_start_s"] * sfreq))
         i1 = int(round(row["rhs_end_s"]   * sfreq))
@@ -120,80 +208,62 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
         seg = walk_data[:, i0:i1]
         if not np.isfinite(seg).all() or np.max(np.abs(seg)) > AMP_THRESH:
             continue
-        pw = mne.time_frequency.tfr_array_morlet(
+
+        power = mne.time_frequency.tfr_array_morlet(
             seg[np.newaxis], sfreq=sfreq, freqs=FREQS,
             n_cycles=N_CYCLES_WAV, output="power",
-            zero_mean=True, verbose=False
+            zero_mean=True, verbose=False,
         )[0]
-        c = int(EDGE_CROP * pw.shape[-1])
-        pw = pw[..., c:-c] if c else pw
-        x_old = np.linspace(0, 1, pw.shape[-1])
-        x_new = np.linspace(0, 1, N_POINTS)
-        pw = np.array([[np.interp(x_new, x_old, pw[ch, f])
-                        for f in range(pw.shape[1])]
-                       for ch in range(pw.shape[0])])
-        tfr_cycles.append(pw)
-        dur = row["rhs_end_s"] - row["rhs_start_s"]
-        rto_fracs.append(float(np.clip(
-            (row["rto_s"] - row["rhs_start_s"]) / dur, 0.3, 0.8
-        )))
+        crop_n = int(EDGE_CROP * power.shape[-1])
+        power = power[..., crop_n:-crop_n] if crop_n else power
+
+        lto_idx = int(round(row["lto_s"] * sfreq)) - i0 - crop_n
+        lhs_idx = int(round(row["lhs_s"] * sfreq)) - i0 - crop_n
+        rto_idx = int(round(row["rto_s"] * sfreq)) - i0 - crop_n
+
+        try:
+            warped = warp_cycle_to_grid(
+                power, lto_idx, lhs_idx, rto_idx,
+                anchors=(A_lto, A_lhs, A_rto), n_points=N_POINTS,
+            )
+        except ValueError:
+            continue
+
+        tfr_cycles.append(warped)
 
     if len(tfr_cycles) < 20:
         raise RuntimeError(
             f"sub-{subject}: only {len(tfr_cycles)} gait cycles accepted"
         )
-    tfr_stack = np.stack(tfr_cycles)   # (cycles, ch, freq, time)
+    tfr_stack = np.stack(tfr_cycles)   # (n_cycles, n_ch, n_freqs, N_POINTS)
 
-    #  ERSP 
-    if decisions["baseline_type"] == "standing":
-        ersp = 10 * np.log10(
-            tfr_stack / baseline_power[np.newaxis, :, :, np.newaxis]
-        )
-    else:
-        baseline_walk = tfr_stack.mean(axis=(0, 3))
-        ersp = 10 * np.log10(
-            tfr_stack / baseline_walk[np.newaxis, :, :, np.newaxis]
-        )
+    # ERSP: per-cycle log ratio to standing baseline
+    ersp_per_cycle = 10 * np.log10(
+        tfr_stack / baseline_power[np.newaxis, :, :, np.newaxis]
+    )
 
-    # Linear spatial filter
-    raw_ref = mne.io.read_raw_fif(iclean_path, preload=False, verbose=False)
-    weights = linear_roi_weights(raw_ref.info, center_ch="Cz")
-    ersp_w  = np.stack([apply_linear_roi(ersp[k], weights)
-                        for k in range(len(ersp))])   # (cycles, freq, time)
+    # Event-anchored double-stance / swing phase split (same anchors used
+    # for warping above, so this is a fixed grid split -- see src.ersp)
+    double_stance_idx, swing_idx = phase_split_indices((A_lto, A_lhs, A_rto), N_POINTS)
 
-    # Phase split 
-    rto_idx = np.round(
-        np.array(rto_fracs) * (N_POINTS - 1)
-    ).astype(int)
+    ersp_double_stance = ersp_per_cycle[:, :, :, double_stance_idx].mean(axis=(0, -1))  # (n_ch, n_freqs)
+    ersp_swing         = ersp_per_cycle[:, :, :, swing_idx].mean(axis=(0, -1))          # (n_ch, n_freqs)
 
-    if decisions["phase_window"] == "full":
-        double_stance = np.array([ersp_w[k, :, :rto_idx[k]].mean()
-                                   for k in range(len(rto_idx))])
-        swing         = np.array([ersp_w[k, :, rto_idx[k]:].mean()
-                                   for k in range(len(rto_idx))])
-    else:   # "segment"
-        def _idx(pct):
-            return int(round(pct / 100 * (N_POINTS - 1)))
-        def _pool(arr, windows):
-            idx = np.concatenate([np.arange(_idx(s), _idx(e)) for s, e in windows])
-            return arr[:, idx].mean()
-        double_stance = np.array([_pool(ersp_w[k], DOUBLE_STANCE_WINDOWS)
-                                   for k in range(len(rto_idx))])
-        swing         = np.array([_pool(ersp_w[k], SWING_WINDOWS)
-                                   for k in range(len(rto_idx))])
+    # Linear Cz-ROI beta-band reduction -- same as prepana07
+    weights = linear_roi_weights(raw_clean.info, center_ch="Cz")
+    beta_double_stance = beta_roi_scalar(ersp_double_stance, weights, FREQS)
+    beta_swing          = beta_roi_scalar(ersp_swing,         weights, FREQS)
 
-    t_stat, t_pval = ttest_rel(double_stance, swing)
-    print(f"  sub-{subject}: t={t_stat:.2f}  p={t_pval:.4f}  "
-          f"double_stance={double_stance.mean():+.2f}  swing={swing.mean():+.2f}  "
-          f"n_cycles={len(double_stance)}")
+    print(f"  sub-{subject}: double_stance={beta_double_stance:+.2f} dB  "
+          f"swing={beta_swing:+.2f} dB  diff={beta_double_stance - beta_swing:+.2f} dB  "
+          f"n_cycles={len(tfr_cycles)}  n_brain_ics={n_brain}")
 
     return {
-        "subject":                 subject,
-        "t_stat":                  float(t_stat),
-        "t_pval":                  float(t_pval),
-        "beta_double_stance_mean": float(double_stance.mean()),
-        "beta_swing_mean":         float(swing.mean()),
-        "n_cycles":                len(double_stance),
-        "n_brain_ics":             int(n_brain),
+        "subject":            subject,
+        "beta_double_stance": float(beta_double_stance),
+        "beta_swing":         float(beta_swing),
+        "beta_diff":          float(beta_double_stance - beta_swing),
+        "n_cycles":           len(tfr_cycles),
+        "n_brain_ics":        int(n_brain),
         **decisions,
     }
