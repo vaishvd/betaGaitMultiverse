@@ -8,6 +8,7 @@ decision set.
 """
 
 import numpy as np
+import pandas as pd
 import mne
 from pathlib import Path
 from autoreject import AutoReject
@@ -28,13 +29,57 @@ N_COMPONENTS = 0.99
 RANDOM_STATE = 42
 AMP_THRESH   = 350e-6
 
+# Approximate adult head radius (metres), used to scale Jacobsen
+# ds003039's unit-sphere electrode positions to a realistic physical
+# size -- matches the ~0.095 m mean radius of MNE's own standard_1005
+# montage (see _set_montage_from_electrodes_tsv).
+HEAD_RADIUS_M = 0.095
+
 
 def load_and_concatenate(
     subject: str,
     raw_dir: Path,
 ) -> mne.io.BaseRaw:
     """
-    Load STAND and CS EEG recordings, concatenate, and add annotations.
+    Load this dataset's raw EEG recording(s) into a single raw object
+    annotated with "STAND" (quiet baseline segment) and "CS" (walking
+    segment), branching on config.EEG_FORMAT:
+
+      "brainvision" (stepUpAms)   : concatenate separate STAND.vhdr and
+          CS.vhdr recordings (see _load_and_concatenate_brainvision).
+      "eeglab" (Jacobsen ds003039): one continuous .set recording,
+          annotated from its own events.tsv (see
+          _load_and_annotate_eeglab).
+
+    Downstream code (prepana02-07, multiverse_pipeline.py) crops on the
+    "STAND"/"CS" annotation names only and never branches on dataset.
+
+    Parameters
+    ----------
+    subject : str
+    raw_dir : Path to d00_raw/
+
+    Returns
+    -------
+    mne.io.BaseRaw  preloaded, EEG-only, montage set, unreferenced,
+    unfiltered, with STAND/CS annotations.
+    """
+    from src.config import EEG_FORMAT
+
+    if EEG_FORMAT == "brainvision":
+        return _load_and_concatenate_brainvision(subject, raw_dir)
+    elif EEG_FORMAT == "eeglab":
+        return _load_and_annotate_eeglab(subject, raw_dir)
+    raise ValueError(f"Unknown EEG_FORMAT: {EEG_FORMAT!r}")
+
+
+def _load_and_concatenate_brainvision(
+    subject: str,
+    raw_dir: Path,
+) -> mne.io.BaseRaw:
+    """
+    Load STAND and CS BrainVision recordings, concatenate, and add
+    annotations. (stepUpAms path; unchanged from prior commits.)
 
     Loads both recordings, picks EEG channels, sets standard_1005
     montage, verifies matching channel names and sfreq, concatenates
@@ -86,6 +131,134 @@ def load_and_concatenate(
     print(f"  sub-{subject}: concat {raw_concat.n_times} samples  "
           f"sfreq={raw_concat.info['sfreq']} Hz")
     return raw_concat
+
+
+def _set_montage_from_electrodes_tsv(
+    raw: mne.io.BaseRaw,
+    electrodes_path: Path,
+    head_radius_m: float = HEAD_RADIUS_M,
+) -> None:
+    """
+    Build and apply a DigMontage from a BIDS *_electrodes.tsv sidecar.
+
+    ds003039's electrode positions are given on a unit sphere in
+    EEGLAB's coordinate convention (X=anterior, Y=left, Z=superior),
+    not MNE's head frame (X=right, Y=anterior, Z=superior) -- axes are
+    permuted (mne_x=-eeglab_y, mne_y=eeglab_x, mne_z=eeglab_z) and
+    scaled by `head_radius_m` to approximate a real head size. Verified
+    against known channel geography (e.g. Fp1 anterior-left, O1/O2
+    posterior) during the ds003039 inventory.
+
+    Modifies `raw` in place (sets its montage); does not return a value.
+
+    Parameters
+    ----------
+    raw             : mne.io.BaseRaw, channels already restricted to EEG
+    electrodes_path : Path to the subject's *_electrodes.tsv
+    head_radius_m   : float, optional. Scale factor for the unit-sphere
+                      positions (default 0.095 m).
+    """
+    pos_df = pd.read_csv(electrodes_path, sep="\t")
+    pos_df = pos_df[pos_df["name"].isin(raw.ch_names)]
+
+    ch_pos = {}
+    for _, row in pos_df.iterrows():
+        x_eeglab, y_eeglab, z_eeglab = float(row["x"]), float(row["y"]), float(row["z"])
+        ch_pos[row["name"]] = np.array([
+            -y_eeglab * head_radius_m,
+             x_eeglab * head_radius_m,
+             z_eeglab * head_radius_m,
+        ])
+
+    montage = mne.channels.make_dig_montage(ch_pos=ch_pos, coord_frame="head")
+    raw.set_montage(montage, on_missing="ignore")
+
+
+def _load_and_annotate_eeglab(
+    subject: str,
+    raw_dir: Path,
+) -> mne.io.BaseRaw:
+    """
+    Load one continuous EEGLAB recording (Jacobsen ds003039) and
+    annotate it with the same "STAND"/"CS" segment names the shared
+    pipeline crops on for stepUpAms, so prepana02-07 and
+    multiverse_pipeline.py need no dataset-specific branching beyond
+    this loader.
+
+    "STAND" <- a fixed config.BASELINE_DURATION_S window starting at
+    the config.BASELINE_START_VALUE event (the dataset's own restEEG
+    end marker fires too early to trust -- see config_jacobsen.py).
+    "CS"    <- the config.SEGMENT_START_VALUE .. SEGMENT_END_VALUE
+    event window (the non-button "easy" outdoor walking bout).
+
+    Drops the 3 non-EEG MISC channels (x_dir/y_dir/z_dir head
+    accelerometer axes) and sets the montage from the BIDS
+    electrodes.tsv (see _set_montage_from_electrodes_tsv).
+
+    Parameters
+    ----------
+    subject : str  e.g. "001"
+    raw_dir : Path to d00_raw/
+
+    Returns
+    -------
+    mne.io.BaseRaw  preloaded, EEG-only, montage set, unreferenced,
+    unfiltered, with STAND/CS annotations.
+    """
+    from src.config import (
+        TASK_NAME, SEGMENT_START_VALUE, SEGMENT_END_VALUE,
+        BASELINE_START_VALUE, BASELINE_DURATION_S,
+    )
+
+    eeg_dir  = raw_dir / f"sub-{subject}" / "eeg"
+    set_path = eeg_dir / f"sub-{subject}_task-{TASK_NAME}_eeg.set"
+    if not set_path.exists():
+        raise FileNotFoundError(set_path)
+
+    raw = mne.io.read_raw_eeglab(set_path, preload=True, verbose=False)
+    drop_invalid_channels(raw)
+
+    # Drop non-EEG channels by type, read from channels.tsv (data-driven,
+    # matches the resolve-from-channels.tsv convention used throughout
+    # src.gait_cycles rather than hardcoding channel names).
+    channels_path = eeg_dir / f"sub-{subject}_task-{TASK_NAME}_channels.tsv"
+    ch_df = pd.read_csv(channels_path, sep="\t")
+    misc_chs = [c for c in ch_df.loc[ch_df["type"] != "EEG", "name"] if c in raw.ch_names]
+    if misc_chs:
+        raw.drop_channels(misc_chs)
+
+    electrodes_path = eeg_dir / f"sub-{subject}_task-{TASK_NAME}_electrodes.tsv"
+    _set_montage_from_electrodes_tsv(raw, electrodes_path)
+
+    events_path = eeg_dir / f"sub-{subject}_task-{TASK_NAME}_events.tsv"
+    events = pd.read_csv(events_path, sep="\t")
+
+    def _onset(value):
+        rows = events.loc[events["value"] == value, "onset"]
+        if len(rows) != 1:
+            raise RuntimeError(
+                f"sub-{subject}: expected exactly one '{value}' event in "
+                f"{events_path.name}, found {len(rows)}"
+            )
+        return float(rows.iloc[0])
+
+    walk_start = _onset(SEGMENT_START_VALUE)
+    walk_end   = _onset(SEGMENT_END_VALUE)
+
+    baseline_start = _onset(BASELINE_START_VALUE)
+    baseline_end   = min(baseline_start + BASELINE_DURATION_S, raw.times[-1])
+    if baseline_end - baseline_start < BASELINE_DURATION_S:
+        print(f"  [WARN] sub-{subject}: baseline window truncated to "
+              f"{baseline_end - baseline_start:.1f}s (recording too short)")
+
+    raw.annotations.append(baseline_start, baseline_end - baseline_start, "STAND")
+    raw.annotations.append(walk_start,     walk_end - walk_start,         "CS")
+
+    print(f"  sub-{subject}: eeglab raw {raw.n_times} samples  "
+          f"sfreq={raw.info['sfreq']:.0f} Hz  "
+          f"STAND=[{baseline_start:.1f},{baseline_end:.1f}]s  "
+          f"CS=[{walk_start:.1f},{walk_end:.1f}]s")
+    return raw
 
 
 def preprocess_raw(
@@ -166,7 +339,7 @@ def preprocess_raw(
         raw = apply_gedai_node(
             raw,
             apply=True,
-            noise_multiplier=gedai_noise_multiplier,
+            broadband_noise_multiplier=gedai_noise_multiplier,
         )
         print(f"  sub-{subject}: GEDAI applied")
     else:
