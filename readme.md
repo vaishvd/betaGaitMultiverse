@@ -1,49 +1,38 @@
 # Multiverse Analysis of Beta Activity During Gait
 
-A modular EEG analysis pipeline investigating **beta-band cortical activity (~13–30 Hz)** across the gait cycle, with a focus on stance–swing phase dynamics. The project uses a **multiverse analysis** framework to quantify how preprocessing decisions affect neural results.
+A modular EEG analysis pipeline investigating **beta-band cortical activity (~13–30 Hz)** across the gait cycle, focused on **double-stance vs swing** phase dynamics. The project uses a **multiverse analysis** framework to quantify how preprocessing decisions affect neural results, and tests robustness across **two independent datasets** (treadmill and overground walking).
 
-The repository is currently under active development. Scripts and parameters may evolve as the methodological framework is refined.
+> The repository is under active development; scripts and parameters may evolve as the methodology is refined.
 
 ---
 
 ## Scientific Background
 
-Cortical beta oscillations are implicated in motor control and gait adaptation. Beta power typically decreases (event-related desynchronisation, ERD) during movement and rebounds (event-related synchronisation, ERS) around heel strike. However, estimates of these dynamics are sensitive to EEG preprocessing choices.
+Cortical beta oscillations are implicated in motor control and gait. Sensorimotor beta power increases (event-related synchronisation, ERS) around double-support phases and decreases (event-related desynchronisation, ERD) during swing. These estimates are sensitive to EEG preprocessing choices.
 
-Rather than committing to a single pipeline, this project runs multiple parallel pipelines, each a plausible combination of preprocessing parameters. The multiver analysis of piplelines aim to ask, *which results are robust, and which depend on methodological choices?*
+Rather than committing to a single pipeline, this project runs many plausible pipelines in parallel and asks: **which results are robust, and which depend on methodological choices?** The approach follows the multiverse framework of Steegen et al. (2016), adapted for EEG by Clayson et al. (2021).
 
 This project investigates:
 
-* How beta dynamics differ between **stance and swing phases**
-* How preprocessing decisions influence estimates of beta activity
-* The robustness of neural findings across multiple preprocessing pipelines
-
-This approach follows the multiverse analysis framework introduced by Steegen et al. (2016, *Perspectives on Psychological Science*) and adapted for EEG by Clayson et al. (2021, *Psychophysiology*).
+- How beta dynamics differ between **double-stance and swing** phases
+- How preprocessing decisions influence estimates of beta activity
+- The robustness of neural findings across preprocessing pipelines **and across two datasets**
 
 ---
 
-## Overview
+## Datasets
 
-This repository implements a full analysis workflow from raw EEG to gait-locked neural activity:
-    - Preprocessing (filtering, rereferencing, artifact handling)= - Event detection and epoching around gait events
-    - Automated artifact rejection
-    - Independent Component Analysis (ICA)
-    - Time-domain and time–frequency analyses
-    - Exploration of alternative preprocessing strategies using a Multiverse analysis
+The pipeline is **dataset-agnostic**: the same reference pipeline and multiverse run on either dataset, selected via a per-dataset config. Dataset-specific differences (loader, montage, event source, baseline) are isolated in config files; all analysis logic is shared.
 
-The emphasis is on transparency, reproducibility, and a quantitative evaluation of how preprocessing decisions affect neural measures.
+### 1. stepUpAms — treadmill (`datasets/stepup/`)
 
----
+Mobile EEG during split-belt treadmill walking. BrainVision format, BIDS. Two recordings per subject: `task-STAND` (standing baseline) and `task-CS` (constant-speed walking). Gait events from motion capture (RHS / LHS / RTO / LTO). ~18 subjects.
 
-## Dataset
+### 2. Jacobsen 2020 — overground (`datasets/jacobsen/`, OpenNeuro ds003039)
 
-Mobile EEG recorded during split-belt treadmill walking. 18 subjects. BrainVision format, stored in BIDS structure.
+Mobile EEG during outdoor free walking. EEGLAB `.set/.fdt`, 500 Hz, 64-channel extended 10-05. Analysis uses the **steady-state even-terrain walking segment without button presses** (`start_easy` → `end_easy`). Gait events are read pre-computed from `events.tsv` (foot-accelerometer detection). 18 usable subjects (sub-019 excluded — corrupt at source).
 
-Each subject has two recordings:
-- `task-STAND` — standing baseline
-- `task-CS` — treadmill walking (constant speed)
-
-Motion capture provides gait events: right/left heel strike (RHS/LHS) and toe-off (RTO/LTO).
+**Documented limitations:** turns within the outdoor route cannot be detected or excluded; the resting baseline uses a provisional fixed window (the `end_restEEG` marker is unreliable), which does not affect the paired contrast.
 
 ---
 
@@ -52,184 +41,179 @@ Motion capture provides gait events: right/left heel strike (RHS/LHS) and toe-of
 ```
 betaGaitMultiverse/
 │
-├── scripts/                               # Executable scripts
-│   ├── main_script_eegpipeline.py         # Runs all 6 canonical pipeline stages
-│   ├── prepana01_prep_gaitevents.py       # Stage 1: gait event detection
-│   ├── prepana02_raw2ica.py               # Stage 2: preprocessing + ICA fitting
-│   ├── prepana03_ica2clean.py             # Stage 3: ICLabel + ICA application
-│   ├── prepana04_clean2gaitcycles.py      # Stage 4: gait cycle extraction
-│   ├── prepana05_gaitcycles2tfr.py        # Stage 5: TFR + ERSP computation
-│   ├── prepana06_plotbetagait.py          # Stage 6: group beta ERSP figure
-│   ├── mulana01_run_multiverse.py         # Multiverse entry point (COMET)
-│   └── 00_download_openneuro_dataset.py   # Download raw data from OpenNeuro
+├── scripts/
+│   ├── main_script_eegpipeline.py       # Runs the 7 reference pipeline stages in sequence
+│   ├── prepana01_prep_gaitevents.py     # Stage 1: gait events (mocap OR events.tsv)
+│   ├── prepana02_raw2ica.py             # Stage 2: preprocessing + ICA fit
+│   ├── prepana03_ica2clean.py           # Stage 3: ICLabel + ICA application
+│   ├── prepana04_clean2gaitcycles.py    # Stage 4: gait cycle extraction
+│   ├── prepana05_gaitcycles2tfr.py      # Stage 5: TFR + ERSP + 4-event warp
+│   ├── prepana06_plotbetagait.py        # Stage 6: group beta ERSP figure
+│   ├── prepana07_betaphase_stats.py     # Stage 7: group paired t-test (DS vs swing)
+│   ├── mulana01_create_multiverse.py    # Multiverse: create 27 universe scripts (COMET)
+│   ├── mulana02_run_multiverse.py       # Multiverse: run universes
+│   ├── mulana03_visualize_multiverse.py # Multiverse: specification curve + plots
+│   └── 00_download_openneuro_dataset.py # Download raw data (openneuro-py + S3 fallback)
 │
-├── src/                                   # Shared library modules
-│   ├── config.py                          # Paths, subject list, pipeline constants
-│   ├── paths.py                           # Dataset directory resolver
-│   ├── pipeline_steps.py                  # Core steps: load, preprocess, ICA
-│   ├── multiverse_pipeline.py             # Single-subject multiverse branch runner
-│   ├── preprocessing.py                   # Channel dropping, bad channel detection
-│   ├── ica_utils.py                       # ICA fitting and ICLabel classification
-│   ├── gait_cycles.py                     # Gait event detection and cycle extraction
-│   ├── spatial_filter.py                  # Gaussian ROI weights (centred on Cz)
-│   ├── qc.py                              # QC logging utilities
+├── src/
+│   ├── config.py                        # Thin selector: ACTIVE_DATASET -> per-dataset config
+│   ├── config_stepup.py                 # stepUpAms settings (BrainVision, mocap, STAND)
+│   ├── config_jacobsen.py               # Jacobsen settings (EEGLAB, events.tsv, provisional baseline)
+│   ├── paths.py                         # Dataset directory resolver (generic)
+│   ├── pipeline_steps.py                # load (format-dispatch), preprocess, ICA
+│   ├── ersp.py                          # Shared: anchors, 4-event warp, phase split, beta ROI
+│   ├── multiverse_pipeline.py           # Single-subject multiverse branch runner
+│   ├── preprocessing.py                 # Channel dropping, bad-channel detection
+│   ├── ica_utils.py                     # ICA fit, ICLabel probabilities, IC selection rules
+│   ├── gait_cycles.py                   # Gait event detection + cycle extraction/validation
+│   ├── spatial_filter.py                # Linear distance-weighted ROI (centred on Cz)
+│   ├── qc.py                            # QC logging utilities
 │   └── nodes/
-│       └── asr_node.py                    # Artifact Subspace Reconstruction (ASR)
+│       ├── asr_node.py                  # Artifact Subspace Reconstruction (ASR)
+│       └── gedai_node.py                # GEDAI (evaluated; excluded from multiverse — see below)
 │
 └── results/
-    ├── pipeline/
-    │   ├── plots/                         # Group beta ERSP figures
-    │   └── qc/                            # QC flags and summary tables
-    └── multiverse/
-        ├── outputs/                       # Specification curve, multiverse plot
-        ├── branches/                      # Cached ICA per branch (gitignored)
-        └── comet/                         # COMET internal files (gitignored)
+    ├── pipeline/<dataset>/{plots,qc}/                   # Per-dataset reference pipeline outputs
+    └── multiverse/<dataset>/{branches,comet,outputs}/  # Per-dataset multiverse (nested)
 ```
+
 ---
 
-## EEG Analysis Pipeline
+## Reference Pipeline (7 stages)
 
-The workflow progresses through several stages. Each stage is implemented as a separate script.
-```
-Raw BrainVision EEG (STAND + CS recordings)
-      ↓
-prepana01: Gait Event Detection
-          (motion capture → RHS, LHS, RTO, LTO timestamps)
-      ↓
-prepana02: Preprocessing + ICA Fit
-          (filter 1–60 Hz, notch 50 Hz, bad channels,
-           optional ASR, average reference, Extended Infomax ICA)
-      ↓
-prepana03: ICLabel + ICA Application
-          (classify components, retain brain ICs, apply to raw)
-      ↓
-Clean Continuous EEG
-      ↓
-prepana04: Gait Cycle Extraction
-          (RHS → RHS, amplitude threshold, save cycle TSV)
-      ↓
-prepana05: TFR + ERSP
-          (Morlet wavelets 13–30 Hz, time-normalise to 0–100%,
-           Linear ROI Cz, standing baseline)
-      ↓
-prepana06: Group Beta ERSP Figure
-          (average across subjects, heatmap with gait phase markers)
-```
+The workflow progresses from raw EEG to a group-level statistical test of the beta double-stance-vs-swing contrast. Each stage is a separate script; `main_script_eegpipeline.py` runs all seven in sequence.
 
 ```mermaid
 flowchart TD
 
-D0[(Raw BrainVision EEG\nSTAND + CS per subject)]:::store
+D0[(Raw EEG<br/>dataset-specific loader)]:::store
 
-subgraph S1["prepana01 — Gait Event Detection"]
-  A1["Load motion capture data"]:::step
-  A2["Detect RHS · LHS · RTO · LTO"]:::step
-  A3["Save gait event TSV"]:::step
-  A1 --> A2 --> A3
+subgraph S1["prepana01 — Gait Events"]
+  A1["Mocap detection (stepup)<br/>OR events.tsv reader (jacobsen)"]:::step
+  A2["Validate RHS · LTO · LHS · RTO<br/>build cycle table"]:::step
+  A1 --> A2
 end
 
-subgraph S2["prepana02 — Preprocessing + ICA Fit"]
-  B1["Concatenate STAND + CS"]:::step
-  B2["Filter: 1–60 Hz bandpass\n50 Hz notch"]:::step
-  B3["Bad channel detection\n& interpolation"]:::step
-  B4["Optional ASR"]:::step
-  B5["Average reference"]:::step
-  B6["Extended Infomax ICA"]:::step
-  B1 --> B2 --> B3 --> B4 --> B5 --> B6
+subgraph S2["prepana02 — Preprocess + ICA Fit"]
+  B1["High-pass + 40 Hz low-pass<br/>50 Hz notch"]:::step
+  B2["Bad-channel detect<br/>& interpolate"]:::step
+  B3["Optional ASR"]:::step
+  B4["Average reference"]:::step
+  B5["Extended Infomax ICA"]:::step
+  B1 --> B2 --> B3 --> B4 --> B5
 end
 
-subgraph S3["prepana03 — ICLabel + ICA Application"]
-  C1["Classify ICs with ICLabel"]:::step
-  C2["Retain brain ICs\n(threshold 0.7)"]:::step
+subgraph S3["prepana03 — ICLabel + Apply"]
+  C1["Classify ICs (ICLabel)"]:::step
+  C2["Select ICs by rule"]:::step
   C3["Apply ICA to raw"]:::step
   C1 --> C2 --> C3
 end
 
-subgraph S4["prepana04 — Gait Cycle Extraction"]
-  D1["Segment walking data (CS)"]:::step
-  D2["Extract RHS → RHS cycles"]:::step
-  D3["Amplitude threshold filter\n(350 µV)"]:::step
-  D4["Save cycles TSV"]:::step
-  D1 --> D2 --> D3 --> D4
+subgraph S4["prepana04 — Gait Cycles"]
+  E1["Extract RHS → RHS cycles"]:::step
+  E2["Amplitude threshold"]:::step
+  E1 --> E2
 end
 
 subgraph S5["prepana05 — TFR + ERSP"]
-  E1["Morlet wavelets\n13–30 Hz, n_cycles = f/2"]:::step
-  E2["Time-normalise\n0–100% gait cycle"]:::step
-  E3["Linear ROI\nCz"]:::step
-  E4["ERSP\n(standing baseline)"]:::step
-  E1 --> E2 --> E3 --> E4
+  F1["Morlet TFR (n_cycles = f/2)"]:::step
+  F2["4-event piecewise warp<br/>to group-median anchors"]:::step
+  F3["Double-stance / swing split<br/>Linear Cz ROI, ERSP (dB)"]:::step
+  F1 --> F2 --> F3
 end
 
 subgraph S6["prepana06 — Group Figure"]
-  F1["Average ERSP\nacross subjects"]:::step
-  F2["Beta heatmap\nwith phase markers"]:::out
-  F1 --> F2
+  G1["Average ERSP across subjects"]:::step
+  G2["Beta heatmap + phase markers"]:::out
+  G1 --> G2
 end
 
-D0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6
+subgraph S7["prepana07 — Group Stats"]
+  H1["Per-subject DS − swing beta"]:::step
+  H2["Group paired t-test"]:::out
+  H1 --> H2
+end
 
-D1e[(gait events\nTSV)]:::store
-D2e[(ICA + clean raw\nFIF)]:::store
-D3e[(gait cycles\nTSV)]:::store
-D4e[(ERSP + ROI weights\nNPY)]:::store
-D5e[(group beta ERSP\nPNG)]:::store
+D0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
 
-S1 --> D1e
-S3 --> D2e
-S4 --> D3e
-S5 --> D4e
-S6 --> D5e
+S1 --> D1[(gait cycles<br/>TSV)]:::store
+S3 --> D2[(clean raw<br/>FIF)]:::store
+S5 --> D3[(ERSP + phase maps<br/>NPY)]:::store
+S6 --> D4[(group beta ERSP<br/>PNG)]:::store
+S7 --> D5[(group stats<br/>TXT)]:::store
 
 classDef step  fill:#20B2AA,stroke:#0e7a74,color:#000
 classDef out   fill:#3CB371,stroke:#277a4d,color:#fff
 classDef store fill:#f5f5f0,stroke:#aaa,color:#444
 ```
 
-**To run the full pipeline:**
+**Gait phases (event-anchored).** Cycles are time-warped on all four events (RHS → LTO → LHS → RTO → RHS) to fixed group-median anchors, so a given percentage of the cycle means the same gait phase in every stride:
 
-```python
-# Run main_script_eegpipeline.py in the interactive window
-# All 6 stages execute in sequence; results saved to results/pipeline/
-```
+- **Double support:** RHS → LTO (initial) and LHS → RTO (terminal)
+- **Swing:** LTO → LHS and RTO → RHS
 
-Key parameters (set in `src/config.py`):
-- Filter: 1–60 Hz bandpass, 50 Hz notch
-- ICA: Extended Infomax, ICLabel brain threshold = 0.7
-- TFR: Morlet wavelets, n_cycles = freq/2, edge crop 5%
-- Spatial filter: Gaussian ROI centred on Cz, σ = 40 mm (Seeber et al. 2015)
+**Key fixed parameters** (`src/config_*.py`):
+
+- Low-pass 40 Hz, notch 50 Hz, average reference
+- ICA: Extended Infomax
+- TFR: Morlet wavelets 8–40 Hz, `n_cycles = f/2`, 5% edge crop, 101-point cycle normalisation
+- Spatial filter: **linear** distance-weighted ROI centred on Cz
+
+**To run:** set `ACTIVE_DATASET` (`stepup` or `jacobsen`) in `src/config.py`, then run `main_script_eegpipeline.py`.
 
 ---
 
 ## Multiverse Analysis
 
-The multiverse analysis systematically varies four preprocessing decisions across 16 universes (2 × 2 × 2 × 2):
+The multiverse systematically varies **three preprocessing decisions across 27 universes (3 × 3 × 3)**.
 
 | Decision | Options | Rationale |
 |----------|---------|-----------|
-| `use_asr` | False, True | Mullen et al. 2015; Gorjan et al. 2022 |
-| `brain_thresh` | 0.7, 0.9 | Pion-Tonachini et al. 2019 |
-| `baseline_type` | standing, walking_mean | Makeig et al. 1993; Seeber et al. 2015 |
-| `phase_window` | full, peak | Petersen et al. 2012; Bulea et al. 2015 |
+| `highpass_hz` | 0.5, 1.0, 2.0 Hz | Klug & Gramann 2021; Delorme 2023 |
+| `asr_mode` | off, sd3 (aggressive), sd20 (lenient) | Chang et al. 2020; Mullen et al. 2015 |
+| `iclabel_rule` | conservative — keep P(brain) > 0.9; balanced — keep P(brain) > 0.7; liberal — reject only P(muscle/eye) > 0.9 | Pion-Tonachini et al. 2019 |
 
-Fixed across all universes: `highpass_hz = 1.0`, `lowpass_hz = 60.0`.
+Fixed across all universes: `lowpass_hz = 40.0`, average reference, Extended Infomax ICA, and the event-anchored warp + double-stance/swing contrast (identical to the reference pipeline via `src/ersp.py`).
 
-The primary outcome is a group-level paired t-statistic comparing stance vs swing beta power across gait cycles, aggregated over 16 subjects.
+**Outcome:** per-subject double-stance − swing beta contrast (dB, Cz-ROI), and the group-level paired t-statistic across subjects.
 
-**To run the multiverse:**
+```mermaid
+flowchart LR
 
-```python
-# Run mulana01_run_multiverse.py in the interactive window
-# Generates 16 universe scripts via COMET, runs them sequentially,
-# and produces a specification curve in results/multiverse/outputs/
+FP["forking_paths<br/>3 × 3 × 3"]:::step --> M1
+
+subgraph M1["mulana01 — Create"]
+  U["Generate 27 universe scripts<br/>(COMET)"]:::step
+end
+
+subgraph M2["mulana02 — Run"]
+  IC["Fit ICA per branch<br/>(9 unique branches)"]:::step
+  RU["Run 27 universes<br/>(iclabel rules reuse cached ICA)"]:::step
+  IC --> RU
+end
+
+subgraph M3["mulana03 — Visualize"]
+  SC["Specification curve"]:::out
+  MP["Multiverse plot"]:::out
+end
+
+M1 --> M2 --> M3
+RU --> R[(multiverse_results<br/>PKL)]:::store
+R --> M3
+
+classDef step  fill:#20B2AA,stroke:#0e7a74,color:#000
+classDef out   fill:#3CB371,stroke:#277a4d,color:#fff
+classDef store fill:#f5f5f0,stroke:#aaa,color:#444
 ```
 
-ICA is cached per branch in `results/multiverse/branches/` so that universes sharing the same filter + ICA settings reuse cached decompositions. There are 4 unique ICA branches across the 16 universes.
+**ICA caching.** ICA is cached per branch, keyed on `{highpass_hz, asr_mode, lowpass_hz}` only — the three `iclabel_rule` values reuse each cached decomposition. This yields **9 unique ICA branches** across the 27 universes.
 
-**Runtime estimate:**
-- First run of each ICA branch: ~90 min (16 subjects × ~5 min ICA)
-- Subsequent universes reusing cached ICA: ~20–30 min each
-- Total: ~6–8 hours
+**GEDAI (excluded).** GEDAI was evaluated as a candidate node but, on these montages, its leadfield-based decomposition failed to converge to a non-degenerate threshold and removed ~96% of sensorimotor beta. It is therefore excluded from the multiverse and retained only as a documented methods-validation finding (`src/nodes/gedai_node.py`, `scripts/diag_gedai_check.py`).
+
+**To run:** `mulana01_create_multiverse.py` → `mulana02_run_multiverse.py` → `mulana03_visualize_multiverse.py`.
+
+**Runtime.** The 9 ICA branches × ~16–18 subjects dominate cost; roughly 10–15 h for a full 27-universe run from a cold cache, much faster on reruns that reuse cached ICA.
 
 ---
 
@@ -250,39 +234,36 @@ source .venv/bin/activate     # macOS/Linux
 uv pip install -e .
 ```
 
-Key dependencies: `mne`, `mne-icalabel`, `autoreject`, `comet-toolbox`, `numpy`, `pandas`, `matplotlib`, `scipy`.
+Key dependencies: `mne`, `mne-icalabel`, `autoreject`, `comet-toolbox`, `asrpy` / `meegkit`, `numpy`, `pandas`, `matplotlib`, `scipy`.
 
 ---
+
 ## Timeline
 
 ```mermaid
 gantt
-    title Multiverse Analysis of beta activity during gait - Timeline
+    title Multiverse Analysis of Beta Activity During Gait — Timeline
     dateFormat  YYYY-MM-DD
     axisFormat  %b %Y
 
-    section Dataset Preparation
-    Identifying datasets          :done, a1, 2026-02-15, 14d
-    Exploring other possible datasets    :active, a2, after a1, 30d
+    section Datasets
+    Dataset 1 (treadmill) setup        :done, a1, 2026-02-15, 20d
+    Dataset 2 (overground) integration :done, a2, 2026-06-15, 25d
 
-    section Preprocessing Pipeline
-    Preprocessing pipeline - dataset1    :active, b1, 2026-02-10, 60d
-    preprocessing pipeline on other datasets       :b2, after b1, 30d
-    Tweaking pipelines          :b3, after b2, 15d
+    section Reference Pipeline
+    Pipeline build (dataset 1)         :done, b1, 2026-02-10, 90d
+    Full-event warp + group stats      :done, b2, 2026-06-01, 30d
+    Pipeline on dataset 2              :active, b3, 2026-07-10, 20d
 
-    section Neural Analysis
-    Beta power extraction               :c1, 2026-04-07, 60d
-    Time-frequency analysis (ERSP)      :c2, 2026-04-07, 60d
-    Gait-cycle normalization            :c3, 2026-04-07, 60d
-
-    section Multiverse Analysis
-    Define preprocessing parameters     :d1, 2026-03-11, 105d
-    Run multiverse pipelines            :d2, 2026-06-08 , 25d
-    Compare preprocessing outcomes      :d3, after d2, 15d
+    section Multiverse
+    Define decision nodes (literature) :done, d1, 2026-03-11, 120d
+    Run multiverse (dataset 1)         :done, d2, 2026-07-01, 15d
+    Run multiverse (dataset 2)         :d3, after b3, 20d
+    Compare across datasets            :d4, after d3, 15d
 
     section Manuscript
-    Figures and statistical analysis    :e1, 2026-07-01, 14d
-    Writing manuscript                  :e2, after e1, 31d
+    Figures & statistics               :e1, 2026-08-15, 21d
+    Writing                            :e2, after e1, 35d
 ```
 
 ---
@@ -291,10 +272,14 @@ gantt
 
 - Steegen S, Tuerlinckx F, Gelman A, Vanpaemel W (2016). Increasing transparency through a multiverse analysis. *Perspectives on Psychological Science*, 11(5), 702–712.
 - Clayson PE, Carbine KA, Baldwin SA, Larson MJ (2021). Methodological reporting behavior, sample sizes, and statistical power in studies of event-related potentials. *Psychophysiology*, 58(2), e13437.
+- Klug M, Gramann K (2021). Identifying key factors for improving ICA-based decomposition of EEG data in mobile and stationary experiments. *European Journal of Neuroscience*, 54(12), 8406–8420.
+- Delorme A (2023). EEG is better left alone. *Scientific Reports*, 13, 2372.
+- Chang C-Y, Hsu S-H, Pion-Tonachini L, Jung T-P (2020). Evaluation of Artifact Subspace Reconstruction for automatic artifact components removal in multi-channel EEG recordings. *IEEE Transactions on Biomedical Engineering*, 67(4), 1114–1121.
+- Mullen TR, et al. (2015). Real-time neuroimaging and cognitive monitoring using wearable dry EEG. *IEEE Transactions on Biomedical Engineering*, 62(11), 2553–2567.
 - Pion-Tonachini L, Kreutz-Delgado K, Makeig S (2019). ICLabel: An automated electroencephalographic independent component classifier, dataset, and feature benchmark. *NeuroImage*, 198, 181–197.
-- Seeber M, Scherer R, Wagner J, Solis-Escalante T, Müller-Putz GR (2015). EEG beta suppression and low gamma modulation are different elements of human upright walking. *Frontiers in Human Neuroscience*, 9, 1–9.
+- Grandchamp R, Delorme A (2011). Single-trial normalization for event-related spectral decomposition reduces sensitivity to noisy trials. *Frontiers in Psychology*, 2, 236.
+- Gwin JT, Gramann K, Makeig S, Ferris DP (2011). Electrocortical activity is coupled to gait cycle phase during treadmill walking. *NeuroImage*, 54(2), 1289–1296.
+- Jacobsen NSJ, Blum S, Witt K, Debener S (2020). A walk in the park? Characterizing gait-related artifacts in mobile EEG recordings. *European Journal of Neuroscience*, 54(12), 8421–8440.
+- Seeber M, Scherer R, Wagner J, Solis-Escalante T, Müller-Putz GR (2015). EEG beta suppression and low gamma modulation are different elements of human upright walking. *Frontiers in Human Neuroscience*, 9.
 - Petersen TH, Willerslev-Olsen M, Conway BA, Nielsen JB (2012). The motor cortex drives the muscles during walking in human subjects. *Journal of Physiology*, 590(10), 2443–2452.
 - Bulea TC, Kim J, Damiano DL, Stanley CJ, Park HS (2015). Prefrontal, posterior parietal and sensorimotor network activity underlying speed control during walking. *Frontiers in Human Neuroscience*, 9, 247.
-- Mullen TR et al. (2015). Real-time neuroimaging and cognitive monitoring using wearable dry EEG. *IEEE Transactions on Biomedical Engineering*, 62(11), 2553–2567.
-- Gorjan D, Gramann K, De Pauw K, Marusic U (2022). Removal of movement-induced EEG artifacts: current state of the art and guidelines. *Journal of Neural Engineering*, 19(1), 011004.
----
