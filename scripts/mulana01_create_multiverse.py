@@ -66,6 +66,7 @@ def analysis_template():
     import numpy as np
     from scipy.stats import ttest_rel
     from src.config import MULTIVERSE_SUBJECTS as SUBJECTS
+    from src.config import MULTIVERSE_LOWPASS_HZ
     from src.multiverse_pipeline import run_subject_multiverse
     # NOTE: comet's Jinja substitution already double-quotes string fork
     # values (see comet.multiverse.Multiverse._render_val) -- do not wrap
@@ -74,7 +75,10 @@ def analysis_template():
         "highpass_hz":  {{ highpass_hz }},
         "asr_mode":     {{ asr_mode }},
         "iclabel_rule": {{ iclabel_rule }},
-        "lowpass_hz":   40.0,
+        # Permanently 40.0 (src.config.MULTIVERSE_LOWPASS_HZ) -- not itself
+        # a forking decision node. The multiverse's own TFR/lowpass are
+        # independent of the reference pipeline's (permanently 8-60 Hz).
+        "lowpass_hz":   MULTIVERSE_LOWPASS_HZ,
     }
     beta_diffs, beta_ds_list, beta_sw_list, n_ok = [], [], [], 0
     for subj in SUBJECTS:
