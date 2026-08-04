@@ -18,8 +18,8 @@ ROOT_DIRNAME = "jacobsen"   # datasets/jacobsen/
 
 # sub-001 .. sub-019 (BIDS zero-padded 3-digit IDs; N=19, all young adults 19-32y)
 # All 19 subjects' raw data are downloaded (see
-# 00_download_openneuro_dataset.py), but sub-019 is EXCLUDED from
-# SUBJECTS below.
+# scripts/setup/00_download_openneuro_dataset.py), but sub-019 is EXCLUDED
+# from SUBJECTS below.
 #
 # KNOWN ISSUE -- sub-019's *_eeg.fdt is truncated AT THE SOURCE on
 # OpenNeuro's own S3 mirror (confirmed via HEAD request: the S3
@@ -60,12 +60,21 @@ EEG_REFERENCE_RAW = "common"   # generic online reference per BIDS eeg.json; pip
 # dataset authors from foot-worn accelerometers (~2 ms reported
 # accuracy) and distributed as rows in events.tsv -- prepana01 reads
 # them directly instead of detecting from motion capture.
+#
+# LABEL INCONSISTENCY -- sub-018 uses a different naming convention for
+# the same four event types ("IC_Left"/"IC_Right"/"TO_Left"/"TO_Right",
+# i.e. Initial-Contact/Toe-Off) instead of every other subject's
+# "LeftHS"/"RightHS"/"LeftTO"/"RightTO". Discovered because the fixed
+# single-string mapping silently produced 0 events for sub-018 (an
+# empty, 0-byte cycles.tsv). Each code below now lists every synonym
+# seen across subjects; src.gait_cycles.load_gait_events_from_tsv
+# matches whichever one is actually present in a given subject's file.
 EVENT_SOURCE = "events_tsv"
 GAIT_EVENT_VALUES = {
-    "LHS": "LeftHS",
-    "RHS": "RightHS",
-    "LTO": "LeftTO",
-    "RTO": "RightTO",
+    "LHS": ["LeftHS", "IC_Left"],
+    "RHS": ["RightHS", "IC_Right"],
+    "LTO": ["LeftTO", "TO_Left"],
+    "RTO": ["RightTO", "TO_Right"],
 }
 
 # --- Segment: steady-state even-terrain walking WITHOUT button presses ---
@@ -73,11 +82,21 @@ GAIT_EVENT_VALUES = {
 SEGMENT_START_VALUE = "start_easy"
 SEGMENT_END_VALUE   = "end_easy"
 
-# --- Baseline ---
-# TODO: restEEG end marker unreliable (fires early); provisional 120 s
-# window pending validation across subjects. Baseline is inert for the
-# paired double-stance-vs-swing contrast, so this does not affect the
-# primary result.
+# --- Baseline: VALIDATED ---
+# Baseline: 120 s standing window from start_restEEG onset. The
+# restEEG start/end markers in ds003039 are mislabeled (end fires
+# early), but the standing-baseline DATA is present; supervisor-
+# confirmed that the 120 s immediately after start_restEEG is the
+# correct standing baseline. Baseline is a divisive normalization
+# applied identically to both phases of the paired double-stance-vs-
+# swing contrast, so it cancels from the contrast; it affects only
+# absolute dB levels.
+#
+# Per-subject validated (all 18 analysis subjects: a full 120 s of
+# continuous recording exists after start_restEEG onset, and that
+# window does not run into the walking task) -- see
+# scripts/diag_jacobsen_baseline_check.py and
+# results/pipeline/jacobsen/qc/baseline_120s_check.txt.
 BASELINE_START_VALUE = "start_restEEG"
 BASELINE_DURATION_S  = 120.0
 

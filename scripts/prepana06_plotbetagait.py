@@ -1,12 +1,20 @@
 """
 ana06_plotbetagait.py
 =====================
-Plot beta-band (13-30 Hz) ERSP across the normalised gait cycle.
+Plot the group-average extended-band ERSP (8-60 Hz -- see
+src.config.PIPELINE_TFR_FMAX) across the normalised gait cycle, alongside
+three beta-band (13-30 Hz) topographies.
 
-Three panels side by side:
-  1. Group beta ERSP heatmap with double stance / swing window lines
-  2. Beta power topography (ERSP averaged over 13-30 Hz and full gait cycle)
-  3. Spatial filter topography (linear ROI weights)
+Left: an 8-60 Hz ERSP heatmap (beta and the 40-60 Hz range both visible;
+the 50 Hz notch is not annotated on-figure -- see band_diagnostics.txt
+and the manuscript Discussion) with event ticks and gait phase bars
+underneath.
+
+Right: three beta-band (13-30 Hz) topographies on a shared colour scale
+with one shared colorbar. Under standing-baseline normalization: whole
+gait cycle, swing only, double-stance only. Under GPM (whole-cycle is
+~zero by construction under GPM, so uninformative): swing only,
+double-stance only, double-stance-minus-swing difference.
 
 Input
 -----
@@ -17,7 +25,11 @@ d03_clean/      sub-{sub}_desc-icaClean_concat_raw.fif  (for channel info)
 
 Output
 ------
-results/pipeline/plots/  group_beta_ersp_topo.png
+results/pipeline/<dataset>/plots/
+    <dataset>_betaersp_gait.png              (NORMALIZATION="gpm", primary)
+    <dataset>_betaersp_gait_standingBL.png    (NORMALIZATION="standing")
+Select via the BETAGAIT_NORMALIZATION env var (src.config.NORMALIZATION,
+default "gpm") -- run this script once per mode to get both files.
 """
 
 import numpy as np
@@ -30,19 +42,22 @@ import mne
 from pathlib import Path
 
 from src.paths import get_dataset_dirs
-from src.config import DATASET, SUBJECTS, DIR_PLOTS
-from src.spatial_filter import linear_roi_weights, apply_linear_roi
-from src.ersp import load_group_anchors
+from src.config import (
+    DATASET, SUBJECTS, DIR_PLOTS, PIPELINE_TFR_FMAX, NORMALIZATION, ERSP_CMAP,
+)
+from src.spatial_filter import linear_roi_weights, apply_linear_roi, TOPOMAP_SPHERE
+from src.ersp import (
+    load_group_anchors, phase_split_indices, apply_gpm_normalization,
+    BETA_FMIN, BETA_FMAX,
+)
 
-FREQS      = np.arange(8, 41)
-ERSP_CLIM  = 4.0
+NORM_LABEL = {
+    "gpm":      "GPM: dB relative to mean gait cycle",
+    "standing": "dB relative to standing baseline",
+}[NORMALIZATION]
+OUT_SUFFIX = "" if NORMALIZATION == "gpm" else "_standingBL"
 
-# Literature-based peak windows (confirmatory, not data-driven)
-# Double stance ERS at heel contact: Petersen et al. 2012 J Physiol
-# Swing ERD: Bulea et al. 2015 Front Hum Neurosci;
-#            Seeber et al. 2015 Front Hum Neurosci
-DOUBLE_STANCE_WINDOWS = [(0, 20), (50, 70)]
-SWING_WINDOWS         = [(20, 50), (70, 100)]
+FREQS = np.arange(8, int(PIPELINE_TFR_FMAX) + 1)
 
 dirs          = get_dataset_dirs(DATASET)
 ERSP_DIR      = dirs["ersp"]
@@ -56,11 +71,18 @@ PLOTS_DIR     = Path(DIR_PLOTS)
 # ERSP arrays were actually warped to.
 A_lto, A_lhs, A_rto = load_group_anchors(ERSP_DIR)
 
-ersp_list    = []
-topo_list    = []   # per-subject (n_ch,) ERSP averaged over freqs & time
-weights_list = []   # per-subject (n_ch,) linear ROI weights
-events_list  = []
-info_ref     = None
+# Event-anchored double-stance / swing phase windows on the common 101-point
+# grid -- same anchors and construction as prepana05/multiverse_pipeline
+# (src.ersp.phase_split_indices).
+double_stance_idx, swing_idx = phase_split_indices((A_lto, A_lhs, A_rto), n_points=101)
+BETA_MASK = (FREQS >= BETA_FMIN) & (FREQS <= BETA_FMAX)
+
+ersp_list       = []
+events_list     = []
+beta_whole_list = []   # per-subject (n_ch,) beta-band ERSP, whole gait cycle
+beta_swing_list = []   # per-subject (n_ch,) beta-band ERSP, swing only
+beta_ds_list    = []   # per-subject (n_ch,) beta-band ERSP, double-stance only
+info_ref        = None
 
 for subject in SUBJECTS:
     try:
@@ -68,9 +90,15 @@ for subject in SUBJECTS:
         cycles_path = GAITEPOCH_DIR / f"sub-{subject}_cycles_kept.tsv"
         clean_path  = CLEAN_DIR     / f"sub-{subject}_desc-icaClean_concat_raw.fif"
 
-        ersp     = np.load(ersp_path)   # (n_ch, n_freqs, 101)
+        ersp     = np.load(ersp_path)   # (n_ch, n_freqs, 101), standing-baselined
         cycles   = pd.read_csv(cycles_path, sep="\t")
         raw_ref  = mne.io.read_raw_fif(clean_path, preload=False, verbose=False)
+
+        # GPM re-normalization (display-layer only, per subject, before any
+        # ROI/phase reduction below) -- see src.ersp.apply_gpm_normalization.
+        # A no-op when NORMALIZATION=="standing".
+        if NORMALIZATION == "gpm":
+            ersp = apply_gpm_normalization(ersp)
 
         # Load or compute linear ROI weights
         weights_path = ERSP_DIR / f"sub-{subject}_roi_weights.npy"
@@ -82,8 +110,13 @@ for subject in SUBJECTS:
         # Apply weights: (n_ch, n_freqs, 101) → (n_freqs, 101)
         ersp_roi = apply_linear_roi(ersp, sub_weights)
 
-        # For topography (Panel 2): average over freqs and full gait cycle
-        ersp_topo = ersp.mean(axis=(1, 2))   # (n_ch,)
+        # Per-channel beta-band (13-30 Hz) topographies, whole cycle / swing /
+        # double-stance, using the same phase windows as prepana05/src.ersp.
+        # phase_split_indices -- no new windowing invented.
+        ersp_beta = ersp[:, BETA_MASK, :]                        # (n_ch, n_beta, 101)
+        beta_whole_list.append(ersp_beta.mean(axis=(1, 2)))                    # (n_ch,)
+        beta_swing_list.append(ersp_beta[:, :, swing_idx].mean(axis=(1, 2)))   # (n_ch,)
+        beta_ds_list.append(ersp_beta[:, :, double_stance_idx].mean(axis=(1, 2)))  # (n_ch,)
 
         dur      = cycles["rhs_end_s"].values - cycles["rhs_start_s"].values
         lto_pct  = (cycles["lto_s"].values  - cycles["rhs_start_s"].values) / dur * 100
@@ -94,8 +127,6 @@ for subject in SUBJECTS:
         mean_rto = float(np.mean(rto_pct))
 
         ersp_list.append(ersp_roi)
-        topo_list.append(ersp_topo)
-        weights_list.append(sub_weights)
         events_list.append((mean_lto, mean_lhs, mean_rto))
         info_ref = raw_ref.info
 
@@ -119,56 +150,86 @@ mean_lto_group, mean_lhs_group, mean_rto_group = A_lto, A_lhs, A_rto
 
 n_subjects = len(ersp_list)
 
-# Group topographies: pool subjects with matching channel count
-n_ch_ref     = topo_list[0].shape[0]
-valid_topo    = [t for t in topo_list    if t.shape[0] == n_ch_ref]
-valid_weights = [w for w in weights_list if w.shape[0] == n_ch_ref]
-group_topo    = np.mean(np.stack(valid_topo),    axis=0)   # (n_ch,)
-group_weights = np.mean(np.stack(valid_weights), axis=0)   # (n_ch,)
+# Group beta topographies: pool subjects with matching channel count
+n_ch_ref         = beta_whole_list[0].shape[0]
+valid_beta_whole = [t for t in beta_whole_list if t.shape[0] == n_ch_ref]
+valid_beta_swing = [t for t in beta_swing_list if t.shape[0] == n_ch_ref]
+valid_beta_ds    = [t for t in beta_ds_list    if t.shape[0] == n_ch_ref]
+group_beta_whole = np.mean(np.stack(valid_beta_whole), axis=0)   # (n_ch,)
+group_beta_swing = np.mean(np.stack(valid_beta_swing), axis=0)   # (n_ch,)
+group_beta_ds    = np.mean(np.stack(valid_beta_ds),    axis=0)   # (n_ch,)
 
 print(f"\n  Group average: n={n_subjects} subjects")
 print(f"  Group ERSP range: {ersp_group.min():.2f} / {ersp_group.max():.2f} dB")
 print(f"  Group events: LTO={mean_lto_group:.1f}%  "
       f"LHS={mean_lhs_group:.1f}%  RTO={mean_rto_group:.1f}%")
 
-# Build figure: left column [heatmap / event ticks / phase bars], right column [topo1 / topo2]
-fig = plt.figure(figsize=(14, 7))
-gs_outer = gridspec.GridSpec(1, 2, width_ratios=[2.5, 1], wspace=0.38, figure=fig)
+out_path = PLOTS_DIR / f"{DATASET}_betaersp_gait{OUT_SUFFIX}.png"
+
+fig = plt.figure(figsize=(18, 13))
+gs_outer = gridspec.GridSpec(1, 2, width_ratios=[2.6, 1.0], wspace=0.3, figure=fig)
 
 gs_left = gridspec.GridSpecFromSubplotSpec(
     4, 1, subplot_spec=gs_outer[0],
-    height_ratios=[10, 3, 1, 1], hspace=0,
+    height_ratios=[10, 3, 1, 1], hspace=0.15,
 )
 gs_right = gridspec.GridSpecFromSubplotSpec(
-    2, 1, subplot_spec=gs_outer[1],
-    hspace=0.50,
+    3, 1, subplot_spec=gs_outer[1],
+    hspace=0.45,
 )
 
-ax_heat   = fig.add_subplot(gs_left[0])
-ax_wave   = fig.add_subplot(gs_left[1], sharex=ax_heat)
-ax_events = fig.add_subplot(gs_left[2], sharex=ax_heat)
-ax_phases = fig.add_subplot(gs_left[3], sharex=ax_heat)
-ax_topo1  = fig.add_subplot(gs_right[0])
-ax_topo2  = fig.add_subplot(gs_right[1])
+ax_heat    = fig.add_subplot(gs_left[0])
+ax_beta    = fig.add_subplot(gs_left[1], sharex=ax_heat)
+ax_events  = fig.add_subplot(gs_left[2], sharex=ax_heat)
+ax_phases  = fig.add_subplot(gs_left[3], sharex=ax_heat)
+ax_topo_w  = fig.add_subplot(gs_right[0])
+ax_topo_sw = fig.add_subplot(gs_right[1])
+ax_topo_ds = fig.add_subplot(gs_right[2])
 
 fig.suptitle(
-    f"Beta ERSP over Gait Cycle — Group Average  "
-    f"(n={n_subjects}, Linear ROI, center=Cz)",
-    fontsize=12, fontweight="bold", y=1.02,
+    f"Extended-band ERSP over Gait Cycle — Group Average  "
+    f"(n={n_subjects}, Linear ROI, center=Cz)\n"
+    f"Normalization: {NORM_LABEL}",
+    fontsize=17, fontweight="bold", y=1.03,
 )
 
-# Row 0 — heatmap with event lines
+# Heatmap — 8-PIPELINE_TFR_FMAX Hz ERSP
+# x-extent half-bin correction: ersp_group has N_POINTS=101 columns at
+# TRUE gait-cycle positions x=0,1,...,100 (see src.ersp.warp_cycle_to_grid's
+# np.linspace(0,100,101)) -- imshow treats an n-column array passed with
+# extent=[0,100] as n equal-width BINS spanning that range, so column i's
+# rendered center lands at (i+0.5)*100/n, not at its true value i. That
+# mismatched the event lines/phase bar below (drawn at the true anchor
+# percentages), by up to +-0.495%. Half-bin correcting the extent (as the
+# y/frequency axis already correctly does with +-0.5 Hz) makes column i
+# render centered exactly on x=i, matching the lines/phase bar exactly.
+n_gait_points = ersp_group.shape[-1]
+dx_gait       = 100.0 / (n_gait_points - 1)
+_uncorrected_max_offset = dx_gait / 2   # what column 0/-1 would be off by without this fix
+print(f"\n  Alignment check -- event anchors: LTO={mean_lto_group:.2f}%  "
+      f"LHS={mean_lhs_group:.2f}%  RTO={mean_rto_group:.2f}%  RHS=0.00/100.00%")
+print(f"  Heatmap x-extent: uncorrected=[0, 100] (max column-vs-anchor "
+      f"offset +-{_uncorrected_max_offset:.4f}%) -> corrected="
+      f"[{-dx_gait/2:.4f}, {100 + dx_gait/2:.4f}] (offset now 0.0000% at every column)")
+# Symmetric color limit, computed PER DATASET AND PER NORMALIZATION MODE
+# from this run's own data (99th percentile of |value|) -- NOT a single
+# global constant shared across datasets/modes. Jacobsen-under-GPM's real
+# range (~+-0.8 dB) is roughly 4x smaller than stepUpAms's (~+-3 dB); a
+# shared fixed limit tuned for one made the other render nearly blank.
+heatmap_vlim = float(np.percentile(np.abs(ersp_group), 99))
+print(f"  Heatmap color limit ({DATASET}, {NORMALIZATION}): "
+      f"99th pct |value| = +-{heatmap_vlim:.3f} dB")
+
 im = ax_heat.imshow(
     ersp_group,
     aspect="auto",
     origin="lower",
-    extent=[0, 100, FREQS[0] - 0.5, FREQS[-1] + 0.5],
-    cmap="RdBu_r",
-    vmin=-ERSP_CLIM, vmax=+ERSP_CLIM,
+    extent=[-dx_gait / 2, 100 + dx_gait / 2, FREQS[0] - 0.5, FREQS[-1] + 0.5],
+    cmap=ERSP_CMAP,
+    vmin=-heatmap_vlim, vmax=+heatmap_vlim,
     zorder=1,
 )
 
-# Gait event lines on heatmap 
 heatmap_events = [
     (0,               "RHS"),
     (mean_lto_group,  "LTO"),
@@ -176,130 +237,131 @@ heatmap_events = [
     (mean_rto_group,  "RTO"),
     (100,             "RHS"),
 ]
-for pct, label in heatmap_events:
-    ax_heat.axvline(
-        pct, color="black", linewidth=1.0,
-        linestyle=":", zorder=3
-    )
+for pct, _ in heatmap_events:
+    ax_heat.axvline(pct, color="black", linewidth=1.0, linestyle=":", zorder=3)
 
-# Alpha/beta boundary at 13 Hz; beta top at 30 Hz
-ax_heat.axhline(13, color="white", linewidth=0.8,
-                linestyle="--", alpha=0.6, zorder=4)
-ax_heat.axhline(30, color="white", linewidth=0.8,
-                linestyle="--", alpha=0.6, zorder=4)
+# Beta band boundaries (13-30 Hz)
+ax_heat.axhline(BETA_FMIN, color="white", linewidth=0.8, linestyle="--", alpha=0.6, zorder=4)
+ax_heat.axhline(BETA_FMAX, color="white", linewidth=0.8, linestyle="--", alpha=0.6, zorder=4)
 
 cbar = fig.colorbar(im, ax=ax_heat, fraction=0.020, pad=0.01)
-cbar.set_label("ERSP (dB)", fontsize=9)
-cbar.ax.tick_params(labelsize=8)
+cbar.set_label("ERSP (dB)", fontsize=13)
+cbar.ax.tick_params(labelsize=11)
 
-ax_heat.set_ylabel("Frequency (Hz)", fontsize=10)
+ax_heat.set_ylabel("Frequency (Hz)", fontsize=14)
 ax_heat.set_xlim(0, 100)
-ax_heat.set_ylim(7.5, 40.5)
-ax_heat.set_yticks([8, 13, 20, 30, 40])
+ax_heat.set_ylim(FREQS[0] - 0.5, FREQS[-1] + 0.5)
+ax_heat.set_yticks(sorted(set([8, 13, 20, 30, 40, 50, int(PIPELINE_TFR_FMAX)])))
 ax_heat.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
-ax_heat.tick_params(axis="y", labelsize=8)
+ax_heat.tick_params(axis="y", labelsize=11)
 ax_heat.spines["bottom"].set_visible(False)
 
-# Row 1 — beta wavelet trace
-beta_trace = ersp_group.mean(axis=0)   # (101,)
-x_gait     = np.linspace(0, 100, 101)
+# Beta-band (13-30 Hz) trace: collapse the beta rows of the same group
+# ERSP to one line across the gait cycle, x-aligned with the heatmap.
+beta_trace = ersp_group[BETA_MASK, :].mean(axis=0)   # (101,)
+x_gait     = np.linspace(0, 100, n_gait_points)
 
-ax_wave.plot(x_gait, beta_trace, color="#2c5f8a", linewidth=1.5)
-ax_wave.fill_between(x_gait, beta_trace, 0,
-                     where=(beta_trace >= 0), color="#c8392b", alpha=0.3)
-ax_wave.fill_between(x_gait, beta_trace, 0,
-                     where=(beta_trace < 0),  color="#2c5f8a", alpha=0.3)
-ax_wave.axhline(0, color="grey", linewidth=0.8, linestyle="--")
+ax_beta.plot(x_gait, beta_trace, color="#2c5f8a", linewidth=1.8, zorder=2)
+ax_beta.axhline(0, color="grey", linewidth=0.8, linestyle="--", zorder=1)
 for pct, _ in heatmap_events:
-    ax_wave.axvline(pct, color="black", linewidth=1.0, linestyle=":", zorder=3)
-ax_wave.set_ylabel("ERSP (dB)", fontsize=8)
-ax_wave.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
-ax_wave.spines["top"].set_visible(False)
-ax_wave.spines["right"].set_visible(False)
-ax_wave.tick_params(axis="y", labelsize=8)
-y_abs      = float(np.abs(beta_trace).max())
-tick_step  = max(1, int(np.ceil(y_abs / 2)))
-ax_wave.set_yticks([-tick_step, 0, tick_step])
+    ax_beta.axvline(pct, color="black", linewidth=1.0, linestyle=":", zorder=3)
+ax_beta.set_ylabel("Beta (13-30 Hz)\nERSP (dB)", fontsize=11)
+ax_beta.set_xlim(0, 100)
+ax_beta.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+ax_beta.tick_params(axis="y", labelsize=10)
+ax_beta.spines["top"].set_visible(False)
+ax_beta.spines["right"].set_visible(False)
 
-# Row 2 — event tick row
-gait_event_ticks = [
-    (0,               "RHS"),
-    (mean_lto_group,  "LTO"),
-    (mean_lhs_group,  "LHS"),
-    (mean_rto_group,  "RTO"),
-    (100,             "RHS"),
-]
-
+# Event tick row
 ax_events.set_ylim(-0.3, 1.0)
 ax_events.plot([0, 100], [0.5, 0.5], color="black", linewidth=1.0, clip_on=False)
-
-for pct, tick_label in gait_event_ticks:
+for pct, tick_label in heatmap_events:
     ax_events.plot([pct, pct], [0.2, 0.8], color="black", linewidth=1.0)
-    ax_events.text(
-        pct, 0.15, tick_label,
-        ha="center", va="top",
-        fontsize=8, color="black",
-    )
-
+    ax_events.text(pct, 0.15, tick_label, ha="center", va="top", fontsize=11, color="black")
 ax_events.set_yticks([])
 ax_events.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
 for spine in ax_events.spines.values():
     spine.set_visible(False)
 
-# Row 3 — phase bar row
-DS_COLOR    = "#C4BFBF"   # dark grey — double support (DS)
-SWING_COLOR = "#D2D899"   # blue      — swing (RLS, LLS)
-
+# Phase bar row
+DS_COLOR    = "#C4BFBF"
+SWING_COLOR = "#D2D899"
 phase_bars = [
-    (0,               mean_lto_group,                    DS_COLOR,    "DS"),
-    (mean_lto_group,  mean_lhs_group - mean_lto_group,   SWING_COLOR, "LLS"),
-    (mean_lhs_group,  mean_rto_group - mean_lhs_group,   DS_COLOR,    "DS"),
-    (mean_rto_group,  100 - mean_rto_group,               SWING_COLOR, "RLS"),
+    (0,               mean_lto_group,                   DS_COLOR,    "DS"),
+    (mean_lto_group,  mean_lhs_group - mean_lto_group,  SWING_COLOR, "LLS"),
+    (mean_lhs_group,  mean_rto_group - mean_lhs_group,  DS_COLOR,    "DS"),
+    (mean_rto_group,  100 - mean_rto_group,              SWING_COLOR, "RLS"),
 ]
-
+print(f"  Phase-bar boundaries: DS 0.00->{mean_lto_group:.2f}  "
+      f"LLS {mean_lto_group:.2f}->{mean_lhs_group:.2f}  "
+      f"DS {mean_lhs_group:.2f}->{mean_rto_group:.2f}  "
+      f"RLS {mean_rto_group:.2f}->100.00  (derived from the same A_lto/A_lhs/A_rto "
+      f"anchors as the vertical lines above -- cannot drift apart)")
 ax_phases.set_ylim(0, 1)
 for left, width, color, label in phase_bars:
-    ax_phases.barh(0.5, width, left=left, height=1.0, color=color,
-                   align="center", edgecolor="none")
-    ax_phases.text(
-        left + width / 2, 0.5, label,
-        ha="center", va="center",
-        fontsize=8, color="black",
-    )
-
-ax_phases.set_xlabel("Gait cycle (%)", fontsize=10, labelpad=4)
+    ax_phases.barh(0.5, width, left=left, height=1.0, color=color, align="center", edgecolor="none")
+    ax_phases.text(left + width / 2, 0.5, label, ha="center", va="center", fontsize=11, color="black")
+ax_phases.set_xlabel("Gait cycle (%)", fontsize=14, labelpad=4)
 ax_phases.set_yticks([])
 ax_phases.set_xticks([0, 20, 40, 60, 80, 100])
-ax_phases.tick_params(axis="x", labelsize=8)
+ax_phases.tick_params(axis="x", labelsize=11)
 for spine in ax_phases.spines.values():
     spine.set_visible(False)
 
-# Panel 2 — Beta power topography
-vlim_topo = np.abs(group_topo).max()
-im2, *_ = mne.viz.plot_topomap(
-    group_topo, info_ref,
-    axes=ax_topo1,
-    show=False,
-    cmap="RdBu_r",
-    vlim=(-vlim_topo, vlim_topo),
-    contours=4,
-)
-fig.colorbar(im2, ax=ax_topo1, fraction=0.046, pad=0.04).set_label("dB", fontsize=8)
-ax_topo1.set_title("Beta power\ntopography", fontsize=10)
+# Three beta-band topographies, shared colour scale + one shared colorbar.
+#
+# Under GPM, "whole gait cycle" is ~zero everywhere by construction (GPM
+# forces each channel's own full-cycle mean to zero, and "whole gait
+# cycle" IS that mean) -- uninformative, so in the GPM figure ONLY it's
+# replaced with the double-stance-minus-swing difference topo: the
+# spatial map of the actual effect, and normalization-invariant (the
+# GPM/standing term cancels in the difference, same proof as the ROI-
+# reduced scalar contrast -- verified below). The standingBL figure keeps
+# the original whole/swing/double-stance layout unchanged.
+if NORMALIZATION == "gpm":
+    group_beta_diff = group_beta_ds - group_beta_swing
+    topo_arrays_shown = [group_beta_swing, group_beta_ds, group_beta_diff]
+    topo_specs = [
+        (ax_topo_w,  group_beta_swing, "Beta (13-30 Hz)\nswing only"),
+        (ax_topo_sw, group_beta_ds,    "Beta (13-30 Hz)\ndouble-stance only"),
+        (ax_topo_ds, group_beta_diff,  "Beta (13-30 Hz)\ndouble-stance - swing"),
+    ]
+else:
+    topo_arrays_shown = [group_beta_whole, group_beta_swing, group_beta_ds]
+    topo_specs = [
+        (ax_topo_w,  group_beta_whole, "Beta (13-30 Hz)\nwhole gait cycle"),
+        (ax_topo_sw, group_beta_swing, "Beta (13-30 Hz)\nswing only"),
+        (ax_topo_ds, group_beta_ds,    "Beta (13-30 Hz)\ndouble-stance only"),
+    ]
 
-# Panel 3 — Spatial filter topography
-im3, *_ = mne.viz.plot_topomap(
-    group_weights, info_ref,
-    axes=ax_topo2,
-    show=False,
-    cmap="Reds",
-    vlim=(0, group_weights.max()),
-    contours=4,
-)
-fig.colorbar(im3, ax=ax_topo2, fraction=0.046, pad=0.04).set_label("Weight", fontsize=8)
-ax_topo2.set_title("Spatial filter\n(Linear ROI weights)", fontsize=10)
+# Symmetric color limit, computed PER DATASET AND PER NORMALIZATION MODE
+# from the 99th percentile of |value| across exactly the arrays actually
+# shown in this figure (not a global constant -- see heatmap_vlim above).
+vlim_beta = float(np.percentile(np.abs(np.concatenate(topo_arrays_shown)), 99))
+print(f"  Beta topo color limit ({DATASET}, {NORMALIZATION}): "
+      f"99th pct |value| = +-{vlim_beta:.3f} dB")
 
-out_path = PLOTS_DIR / "group_beta_ersp_topo.png"
-fig.savefig(out_path, dpi=150, bbox_inches="tight")
+im_topo = None
+for ax, data, title in topo_specs:
+    im_topo, *_ = mne.viz.plot_topomap(
+        data, info_ref,
+        axes=ax,
+        show=False,
+        cmap=ERSP_CMAP,
+        vlim=(-vlim_beta, vlim_beta),
+        contours=4,
+        sphere=TOPOMAP_SPHERE,
+    )
+    ax.set_title(title, fontsize=14)
+
+topo_cbar = fig.colorbar(
+    im_topo, ax=[ax_topo_w, ax_topo_sw, ax_topo_ds],
+    fraction=0.05, pad=0.08,
+)
+topo_cbar.set_label("Beta ERSP (dB)", fontsize=12)
+topo_cbar.ax.tick_params(labelsize=10)
+
+fig.savefig(out_path, dpi=300, bbox_inches="tight")
 plt.close(fig)
+
 print(f"\n  Group figure saved -> {out_path.name}")

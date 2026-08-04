@@ -235,9 +235,16 @@ def load_gait_events_from_tsv(
         The `value` entries marking the start/end of the segment to
         keep (e.g. "start_easy" / "end_easy").
     gait_event_values : dict
-        Maps the four canonical event codes to this dataset's `value`
-        strings, e.g. {"LHS": "LeftHS", "RHS": "RightHS",
-        "LTO": "LeftTO", "RTO": "RightTO"}.
+        Maps each of the four canonical event codes to one or more
+        `value` strings used for it in this dataset, e.g.
+        {"LHS": ["LeftHS", "IC_Left"], "RHS": ["RightHS", "IC_Right"],
+        "LTO": ["LeftTO", "TO_Left"], "RTO": ["RightTO", "TO_Right"]}.
+        A single string is also accepted per code. Multiple synonyms
+        matter in practice: ds003039's sub-018 labels the same four
+        event types "IC_Left"/"IC_Right"/"TO_Left"/"TO_Right"
+        ("Initial Contact"/"Toe-Off") instead of every other subject's
+        "LeftHS"/"RightHS"/"LeftTO"/"RightTO" -- whichever synonym is
+        actually present in a given subject's file is matched.
 
     Returns
     -------
@@ -272,7 +279,10 @@ def load_gait_events_from_tsv(
     in_segment = (events["onset"] >= seg_t0) & (events["onset"] <= seg_t1)
 
     def _samples(code):
-        rows = events[in_segment & (events["value"] == gait_event_values[code])]
+        candidates = gait_event_values[code]
+        if isinstance(candidates, str):
+            candidates = [candidates]
+        rows = events[in_segment & events["value"].isin(candidates)]
         rel = rows["sample"].to_numpy(dtype=float) - seg_sample0
         return np.sort(rel).astype(int)
 

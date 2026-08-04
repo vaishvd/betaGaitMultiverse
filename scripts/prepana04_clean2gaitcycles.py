@@ -28,6 +28,7 @@ import mne
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS
 from src.qc import log_qc
+from src.resume import stage_already_done
 
 AMP_THRESH = 350e-6  # V
 
@@ -43,7 +44,20 @@ for subject in SUBJECTS:
     try:
         print(f"GAIT SEGMENTATION: sub-{subject}")
 
-        raw_path = CLEAN_DIR / f"sub-{subject}_desc-icaClean_concat_raw.fif"
+        raw_path    = CLEAN_DIR / f"sub-{subject}_desc-icaClean_concat_raw.fif"
+        cycles_path = GAIT_EVENTS_DIR / f"sub-{subject}_cycles.tsv"
+
+        out_seg  = GAITEPOCH_DIR / f"sub-{subject}_gait_segments.npy"
+        out_sfreq = GAITEPOCH_DIR / f"sub-{subject}_gait_sfreq.npy"
+        out_meta = GAITEPOCH_DIR / f"sub-{subject}_cycles_kept.tsv"
+
+        if stage_already_done(
+            [out_seg, out_sfreq, out_meta],
+            inputs=[raw_path, cycles_path],
+            validate=lambda: np.load(out_seg, allow_pickle=True),
+        ):
+            print(f"  Already complete -- skipping sub-{subject}")
+            continue
 
         if not raw_path.exists():
             print(f"  Clean EEG not found, skipping: {raw_path.name}")
@@ -76,7 +90,6 @@ for subject in SUBJECTS:
             print(f"  Channels with >1% NaN ({len(bad_chs)}): {bad_chs}")
             print(f"  These channels will be excluded from segments.")
 
-        cycles_path = GAIT_EVENTS_DIR / f"sub-{subject}_cycles.tsv"
         cycles_df   = pd.read_csv(cycles_path, sep="\t")
 
         if len(cycles_df) == 0:
@@ -162,10 +175,6 @@ for subject in SUBJECTS:
         segments_arr = np.empty(n_extracted, dtype=object)
         for i, seg in enumerate(gait_segments):
             segments_arr[i] = seg
-
-        out_seg   = GAITEPOCH_DIR / f"sub-{subject}_gait_segments.npy"
-        out_sfreq = GAITEPOCH_DIR / f"sub-{subject}_gait_sfreq.npy"
-        out_meta  = GAITEPOCH_DIR / f"sub-{subject}_cycles_kept.tsv"
 
         np.save(out_seg,   segments_arr, allow_pickle=True)
         np.save(out_sfreq, np.float64(sfreq))

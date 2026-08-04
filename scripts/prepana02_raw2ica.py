@@ -37,6 +37,7 @@ from src.config import DATASET, SUBJECTS, USE_ASR, ASR_CUTOFF
 from src.pipeline_steps import load_and_concatenate, preprocess_raw, fit_ica
 from src.ica_utils import save_ica_component_plots
 from src.qc import log_qc
+from src.resume import stage_already_done
 
 L_FREQ       = 1.0   # Hz — canonical pipeline high-pass
 H_FREQ       = 60.0  # Hz — canonical pipeline low-pass
@@ -50,6 +51,22 @@ QC_DIR   = dirs["qc"]
 for subject in SUBJECTS:
     try:
         print(f"\nProcessing sub-{subject}")
+
+        concat_out    = PREP_DIR / f"sub-{subject}_concat_raw.fif"
+        ica_save_path = PREP_DIR / f"sub-{subject}_ica.fif"
+        epo_save_path = PREP_DIR / f"sub-{subject}_preica_clean_epo.fif"
+
+        # ica_save_path/epo_save_path must also be NEWER than concat_out:
+        # a fresh concat_raw.fif sitting next to a stale ica.fif (e.g.
+        # left over from an interrupted prior run) must NOT be treated
+        # as complete -- see src.resume.stage_already_done.
+        if stage_already_done(
+            [ica_save_path, epo_save_path],
+            inputs=[concat_out],
+            validate=lambda: mne.preprocessing.read_ica(ica_save_path, verbose=False),
+        ):
+            print(f"  Already complete -- skipping sub-{subject}")
+            continue
 
         # load_and_concatenate() raises FileNotFoundError for whichever
         # dataset-specific raw file is missing (BrainVision .vhdr or
@@ -68,7 +85,6 @@ for subject in SUBJECTS:
 
         # Save preprocessed concatenated raw
 
-        concat_out = PREP_DIR / f"sub-{subject}_concat_raw.fif"
         raw_concat.save(concat_out, overwrite=True)
         print(f"  Saved concat raw -> {concat_out.name}")
 
@@ -89,9 +105,6 @@ for subject in SUBJECTS:
 
         # ICA: AutoReject → Extended Infomax → ICLabel → apply
         # Saves ICA object and pre-ICA epochs to disk for prepana03
-        ica_save_path = PREP_DIR / f"sub-{subject}_ica.fif"
-        epo_save_path = PREP_DIR / f"sub-{subject}_preica_clean_epo.fif"
-
         raw_concat, ica, n_brain_ics = fit_ica(
             raw_concat,
             subject,

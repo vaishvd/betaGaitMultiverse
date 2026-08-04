@@ -227,6 +227,23 @@ def _load_and_annotate_eeglab(
     if misc_chs:
         raw.drop_channels(misc_chs)
 
+    # Also drop any channel present in the raw .set but NOT documented
+    # in channels.tsv at all -- sub-018's raw file has 6 extra
+    # Left/Right_Accelerometer_X/Y/Z channels absent from its own
+    # channels.tsv (a BIDS metadata omission specific to that subject,
+    # discovered when it crashed raw.interpolate_bads() in
+    # preprocess_raw(): MNE's EEGLAB reader carried over nonzero
+    # positions for 2 of them from the .set file's own chanlocs, which
+    # is not caught by the type-based drop above since they're simply
+    # absent from ch_df). Whitelisting to documented channels only
+    # prevents this for this or any future subject with the same
+    # omission.
+    undocumented = [c for c in raw.ch_names if c not in set(ch_df["name"])]
+    if undocumented:
+        print(f"  sub-{subject}: dropping undocumented channels "
+              f"(absent from channels.tsv): {undocumented}")
+        raw.drop_channels(undocumented)
+
     electrodes_path = eeg_dir / f"sub-{subject}_task-{TASK_NAME}_electrodes.tsv"
     _set_montage_from_electrodes_tsv(raw, electrodes_path)
 
@@ -245,11 +262,29 @@ def _load_and_annotate_eeglab(
     walk_start = _onset(SEGMENT_START_VALUE)
     walk_end   = _onset(SEGMENT_END_VALUE)
 
+    # Validated per-subject for all 18 analysis subjects (see
+    # scripts/diag_jacobsen_baseline_check.py and
+    # results/pipeline/jacobsen/qc/baseline_120s_check.txt): a full 120 s
+    # of continuous recording exists after start_restEEG onset, and that
+    # window does not run into the walking task. This raises rather than
+    # silently truncating -- if it ever fires for a subject not covered
+    # by that validation, that's a real data problem requiring a
+    # decision, not something to paper over with a shortened window.
     baseline_start = _onset(BASELINE_START_VALUE)
-    baseline_end   = min(baseline_start + BASELINE_DURATION_S, raw.times[-1])
-    if baseline_end - baseline_start < BASELINE_DURATION_S:
-        print(f"  [WARN] sub-{subject}: baseline window truncated to "
-              f"{baseline_end - baseline_start:.1f}s (recording too short)")
+    baseline_end   = baseline_start + BASELINE_DURATION_S
+    if baseline_end > raw.times[-1]:
+        raise RuntimeError(
+            f"sub-{subject}: only {raw.times[-1] - baseline_start:.1f}s of "
+            f"recording after {BASELINE_START_VALUE} onset -- "
+            f"{BASELINE_DURATION_S:.0f}s baseline window would be truncated. "
+            "Not silently shortening -- this subject needs an explicit decision."
+        )
+    if baseline_end > walk_start:
+        raise RuntimeError(
+            f"sub-{subject}: {BASELINE_DURATION_S:.0f}s baseline window "
+            f"[{baseline_start:.1f}, {baseline_end:.1f}]s overruns "
+            f"{SEGMENT_START_VALUE} at {walk_start:.1f}s -- needs an explicit decision."
+        )
 
     raw.annotations.append(baseline_start, baseline_end - baseline_start, "STAND")
     raw.annotations.append(walk_start,     walk_end - walk_start,         "CS")

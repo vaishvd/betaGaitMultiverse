@@ -31,6 +31,7 @@ from src.config import DATASET, SUBJECTS
 from src.pipeline_steps import apply_ica
 from src.ica_utils import label_and_mark_ica
 from src.qc import log_qc
+from src.resume import stage_already_done
 
 # Components below this threshold (or labelled as non-brain) are excluded.
 BRAIN_THRESH = 0.7
@@ -43,6 +44,21 @@ QC_DIR    = dirs["qc"]
 for subject in SUBJECTS:
     try:
         print(f"ICA CLEANING: sub-{subject}")
+
+        ica_in_path = PREP_DIR / f"sub-{subject}_ica.fif"
+        clean_ica_out = CLEAN_DIR / f"sub-{subject}_clean-ica.fif"
+        clean_raw_out = CLEAN_DIR / f"sub-{subject}_desc-icaClean_concat_raw.fif"
+
+        # Staleness is checked against ica_in_path (this stage's input):
+        # if prepana02 refit the ICA more recently than this stage's own
+        # output, that output is stale and must be redone.
+        if stage_already_done(
+            [clean_ica_out, clean_raw_out],
+            inputs=[ica_in_path],
+            validate=lambda: mne.io.read_raw_fif(clean_raw_out, preload=False, verbose=False),
+        ):
+            print(f"  Already complete -- skipping sub-{subject}")
+            continue
 
         # Load preprocessed continuous raw
 
@@ -105,13 +121,11 @@ for subject in SUBJECTS:
             continue
 
         # Save ICA with exclusions for downstream scripts
-        ica_clean_out = CLEAN_DIR / f"sub-{subject}_clean-ica.fif"
-        ica.save(ica_clean_out, overwrite=True, verbose=False)
-        print(f"  Saved ICA with exclusions -> {ica_clean_out.name}")
+        ica.save(clean_ica_out, overwrite=True, verbose=False)
+        print(f"  Saved ICA with exclusions -> {clean_ica_out.name}")
 
-        out = CLEAN_DIR / f"sub-{subject}_desc-icaClean_concat_raw.fif"
-        raw_clean.save(out, overwrite=True, verbose=False)
-        print(f"  Saved -> {out.name}")
+        raw_clean.save(clean_raw_out, overwrite=True, verbose=False)
+        print(f"  Saved -> {clean_raw_out.name}")
 
         # --- QC: ICA ---
         n_total_comps  = len(ica.mixing_matrix_.T)

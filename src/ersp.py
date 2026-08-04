@@ -197,6 +197,33 @@ def compute_standing_baseline(
     return stack.mean(axis=(0, 3))   # (n_ch, n_freqs)
 
 
+def apply_gpm_normalization(ersp):
+    """
+    Gait-phase-mean (GPM) re-normalization of an already baseline-
+    normalized ERSP array: express each (channel, frequency) row's ERSP
+    as dB relative to that row's OWN mean across the whole gait cycle,
+    instead of dB relative to the standing/rest baseline.
+
+        ERSP_gpm(..., t) = ERSP(..., t) - mean_t[ERSP(..., t)]
+
+    Operates on the last axis (the gait-cycle-% axis, e.g. the 101-point
+    grid from warp_cycle_to_grid); works on any leading shape --
+    (n_ch, n_freqs, n_points), (n_freqs, n_points), etc.
+
+    This is a pure post-hoc transform of the standing-baselined ERSP
+    dB array -- it does not touch the underlying TFR power, the
+    standing baseline, or any raw/ICA data. Because it subtracts a
+    per-(channel, frequency) CONSTANT (uniform across t) from every
+    gait-cycle point, it cancels EXACTLY in any linear contrast between
+    two subsets of t -- in particular the double-stance-mean-minus-
+    swing-mean beta contrast used by prepana07/multiverse_pipeline is
+    mathematically invariant to this transform, and the group paired
+    t-test is identical whether GPM or standing normalization is used
+    (see prepana07_betaphase_stats.py's cross-mode verification).
+    """
+    return ersp - ersp.mean(axis=-1, keepdims=True)
+
+
 def beta_roi_scalar(ersp_map, weights, freqs, fmin=BETA_FMIN, fmax=BETA_FMAX):
     """
     Reduce a (n_ch, n_freqs) ERSP map to a single beta-band scalar using

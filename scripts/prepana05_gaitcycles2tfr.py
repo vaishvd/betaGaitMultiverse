@@ -32,12 +32,13 @@ import pandas as pd
 import mne
 
 from src.paths import get_dataset_dirs
-from src.config import DATASET, SUBJECTS
+from src.config import DATASET, SUBJECTS, PIPELINE_TFR_FMAX
 from src.qc import log_qc
+from src.resume import stage_already_done
 from src.spatial_filter import linear_roi_weights, apply_linear_roi, plot_weight_topography
 from src.ersp import warp_cycle_to_grid, phase_split_indices, compute_standing_baseline
 
-FREQS    = np.arange(8, 41, dtype=float)    # 8-40 Hz (alpha-beta range)
+FREQS    = np.arange(8, int(PIPELINE_TFR_FMAX) + 1, dtype=float)  # 8-60 Hz, permanent (alpha-beta-gamma)
 N_CYCLES = FREQS / 2.0                      # frequency-dependent wavelet width
 N_POINTS = 101  # 0-100% gait cycle in 1% steps; below native resolution (~248 samples at 250 Hz), avoids upsampling artefacts
 EDGE_CROP = 0.05                            # fraction trimmed at each edge post-TFR
@@ -120,15 +121,29 @@ for subject in SUBJECTS:
     try:
         print(f"ERSP: sub-{subject}")
 
+        clean_fif  = CLEAN_DIR / f"sub-{subject}_desc-icaClean_concat_raw.fif"
+        seg_path   = GAITEPOCH_DIR / f"sub-{subject}_gait_segments.npy"
+
+        out_ds      = ERSP_DIR / f"sub-{subject}_ersp_double_stance.npy"
+        out_sw      = ERSP_DIR / f"sub-{subject}_ersp_swing.npy"
+        out_beta    = ERSP_DIR / f"sub-{subject}_ersp_beta.npy"
+        out_weights = ERSP_DIR / f"sub-{subject}_roi_weights.npy"
+
+        if stage_already_done(
+            [out_ds, out_sw, out_beta, out_weights],
+            inputs=[clean_fif, seg_path],
+            validate=lambda: np.load(out_beta),
+        ):
+            print(f"  Already complete -- skipping sub-{subject}")
+            continue
+
         # Load ICA-cleaned concatenated raw; preload=True so STAND segment can be extracted
-        clean_fif    = CLEAN_DIR / f"sub-{subject}_desc-icaClean_concat_raw.fif"
         concat_raw   = mne.io.read_raw_fif(clean_fif, preload=True, verbose=False)
         ch_names_ref = list(concat_raw.ch_names)
         print(f"  Reference channels from clean raw: {len(ch_names_ref)}")
 
         # Load Gait Segments
 
-        seg_path   = GAITEPOCH_DIR / f"sub-{subject}_gait_segments.npy"
         sfreq_path = GAITEPOCH_DIR / f"sub-{subject}_gait_sfreq.npy"
 
         if not seg_path.exists():
@@ -271,7 +286,7 @@ for subject in SUBJECTS:
         _info = concat_raw.info
         try:
             weights = linear_roi_weights(_info, center_ch="Cz")
-            np.save(ERSP_DIR / f"sub-{subject}_roi_weights.npy", weights)
+            np.save(out_weights, weights)
 
             plot_weight_topography(
                 weights, _info, subject,
@@ -325,14 +340,13 @@ for subject in SUBJECTS:
         print(f"  Swing         ERSP (segment, sensorimotor mean): "
               f"{ersp_avg[_smx][:, :, swing_idx].mean():+.2f} dB")
 
-        np.save(ERSP_DIR / f"sub-{subject}_ersp_double_stance.npy", ersp_double_stance)
-        np.save(ERSP_DIR / f"sub-{subject}_ersp_swing.npy",         ersp_swing)
-        print(f"  Saved -> sub-{subject}_ersp_double_stance.npy  shape={ersp_double_stance.shape}")
-        print(f"  Saved -> sub-{subject}_ersp_swing.npy           shape={ersp_swing.shape}")
+        np.save(out_ds, ersp_double_stance)
+        np.save(out_sw, ersp_swing)
+        print(f"  Saved -> {out_ds.name}  shape={ersp_double_stance.shape}")
+        print(f"  Saved -> {out_sw.name}  shape={ersp_swing.shape}")
 
-        out = ERSP_DIR / f"sub-{subject}_ersp_beta.npy"
-        np.save(out, ersp_avg)
-        print(f"\n  Saved -> {out.name}")
+        np.save(out_beta, ersp_avg)
+        print(f"\n  Saved -> {out_beta.name}")
 
         # --- QC: ERSP ---
         n_nan         = int(np.isnan(ersp_avg).sum())

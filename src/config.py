@@ -29,6 +29,85 @@ if ACTIVE_DATASET not in _PER_DATASET:
         f"expected one of {sorted(_PER_DATASET)}"
     )
 
+# --- ERSP normalization mode -- shared, dataset-agnostic, selectable via
+# env var exactly like ACTIVE_DATASET above.
+#   "gpm"      -- PRIMARY. dB relative to each subject's own mean ERSP
+#                 across the whole gait cycle (src.ersp.
+#                 apply_gpm_normalization), applied on top of the
+#                 existing standing-baselined ERSP arrays. Removes the
+#                 global standing-vs-walking offset (e.g. Jacobsen's
+#                 all-negative ERSP, a baseline-choice artifact: standing
+#                 beta > walking beta) and shows phase modulation
+#                 directly. Mathematically invariant for the double-
+#                 stance-vs-swing contrast (a per-subject, per-frequency
+#                 CONSTANT subtracted uniformly across the gait cycle
+#                 cancels exactly in any linear contrast between two
+#                 subsets of it) -- verified in
+#                 prepana07_betaphase_stats.py.
+#   "standing" -- previous/default behaviour: dB relative to the
+#                 standing/rest baseline (stepUpAms STAND; Jacobsen
+#                 restEEG+120s). Still fully runnable for comparison.
+# Does not affect preprocessing, ICA, or the multiverse (which is
+# untouched by this switch and always uses the standing baseline).
+NORMALIZATION = os.environ.get("BETAGAIT_NORMALIZATION", "gpm")
+if NORMALIZATION not in ("gpm", "standing"):
+    raise ValueError(
+        f"Unknown NORMALIZATION {NORMALIZATION!r} -- expected 'gpm' or 'standing'"
+    )
+
+# --- Permanent band split (was formerly an ACTIVE_VARIANT/BETAGAIT_VARIANT
+# toggle between "ref40"/"ref60" -- retired; see git history if that
+# mechanism is ever needed again). The reference/canonical pipeline
+# (prepana01-07) and the multiverse now each have their own fixed,
+# independent TFR ceiling -- they are no longer tied together by a
+# single switch:
+#   PIPELINE_TFR_FMAX     -- canonical pipeline's TFR upper bound (Hz).
+#                            Permanently 60: visualizes beta-gamma
+#                            decoupling. The canonical raw low-pass
+#                            filter (prepana02_raw2ica.py's H_FREQ=60.0)
+#                            is unrelated and unaffected by this constant.
+#   MULTIVERSE_TFR_FMAX   -- multiverse's TFR upper bound (Hz).
+#                            Permanently 40, unchanged from the original
+#                            validated multiverse.
+#   MULTIVERSE_LOWPASS_HZ -- multiverse's own fixed lowpass_hz decision
+#                            (mulana01_create_multiverse.py's analysis_
+#                            template). Permanently 40.0, unchanged from
+#                            the original validated multiverse.
+PIPELINE_TFR_FMAX     = 60.0
+MULTIVERSE_TFR_FMAX   = 40.0
+MULTIVERSE_LOWPASS_HZ = 40.0
+
+# --- Shared plotting constants (display-only -- never read by any ERSP,
+# ROI-weight, or statistical computation; changing these cannot change
+# t(16)=5.098 or any other stat). Single source of truth so every ERSP
+# heatmap and ERSP-derived topography in the repo (reference-pipeline
+# ERSP, its 3 beta topographies, and the multiverse zoom-universe
+# heatmaps) shares one colormap and, per plot type, one symmetric limit.
+#
+#   ERSP_CMAP         -- diverging, zero-centered: red=ERS(+)/blue=ERD(-)/
+#                        white=0. Must never be a sequential or rainbow
+#                        map (turbo etc.) -- the ERS/ERD sign and the
+#                        zero-crossing are the entire point of these plots.
+#   ERSP_HEATMAP_VLIM -- symmetric dB limit used ONLY by
+#                        mulana04_zoom_universes.py now, to guarantee its
+#                        3 zoom-universe panels always share one scale,
+#                        trivially, by construction (a fixed constant
+#                        rather than a per-run data-driven max). NOT used
+#                        by prepana06_plotbetagait.py any more -- that
+#                        script now computes its own heatmap/topo limits
+#                        per dataset and per NORMALIZATION mode (99th
+#                        percentile of |value| for that specific run),
+#                        since one global constant made Jacobsen-under-
+#                        GPM (real range ~+-0.8 dB) render nearly blank
+#                        against a limit tuned for stepUpAms (~+-3 dB).
+#   BETA_TOPO_VLIM    -- retained for reference/history only; no longer
+#                        imported anywhere (prepana06 now computes its
+#                        own per-dataset-per-mode beta topo limit the
+#                        same way as ERSP_HEATMAP_VLIM above).
+ERSP_CMAP         = "RdBu_r"
+ERSP_HEATMAP_VLIM = 3.0
+BETA_TOPO_VLIM    = 4.0
+
 _active = _PER_DATASET[ACTIVE_DATASET]
 
 # Re-export every public attribute of the active per-dataset config
