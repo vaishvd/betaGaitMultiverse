@@ -1,3 +1,5 @@
+# Jacobsen-specific: downloads ds003039 only, not reusable for stepUpAms.
+
 from src.config import DATASETS
 from src.paths import get_dataset_dirs
 import openneuro as on
