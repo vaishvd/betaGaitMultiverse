@@ -51,3 +51,25 @@ old scripts/
 initialanalysis.ipynb
 uv.lock
 possibleDatasets.xlsx
+
+# GEDAI -- evaluated, excluded from the multiverse (see README). Kept on
+# disk as a methods-validation record, untracked only; do NOT add
+# src/nodes/gedai_node.py here -- that one is tracked, in-repo pipeline
+# code cited directly by the README.
+scripts/diag_gedai_check.py
+results/pipeline/*/qc/gedai_gate_check.txt
+
+# Diagnostic / one-off investigation scripts and their reports
+scripts/diag_band_diagnostics.py
+scripts/diag_jacobsen_dataquality.py
+scripts/diag_jacobsen_baseline_check.py
+results/pipeline/*/qc/band_diagnostics.txt
+results/pipeline/jacobsen/qc/dataquality_audit.txt
+results/pipeline/jacobsen/qc/baseline_120s_check.txt
+
+# Ad-hoc run logs and throwaway launcher batch files
+*.log
+run_jacobsen2.bat
+
+# Claude Code local tooling config
+.claude/
