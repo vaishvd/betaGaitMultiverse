@@ -15,7 +15,7 @@ import mne
 from pathlib import Path
 from autoreject import AutoReject
 
-from src.config import DATASET, DIR_MULTIVERSE_BRANCHES
+from src.config import DATASET, DIR_MULTIVERSE_BRANCHES, MULTIVERSE_TFR_FMAX
 from src.paths import get_dataset_dirs
 from src.preprocessing import drop_invalid_eeg_channels
 from src.pipeline_steps import load_and_concatenate, preprocess_raw, apply_ica
@@ -30,7 +30,7 @@ from src.ersp import (
 )
 
 AMP_THRESH   = 350e-6
-FREQS        = np.arange(8, 41, dtype=float)
+FREQS        = np.arange(8, int(MULTIVERSE_TFR_FMAX) + 1, dtype=float)  # 8-40 Hz, permanent
 N_CYCLES_WAV = FREQS / 2.0
 N_POINTS     = 101
 EDGE_CROP    = 0.05
@@ -126,8 +126,9 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
     ----------
     decisions : dict with keys "highpass_hz" (float), "asr_mode"
         ("off"/"sd3"/"sd20"), "iclabel_rule" ("conservative"/"balanced"/
-        "liberal"), "lowpass_hz" (float, fixed at 40.0 by the multiverse
-        template).
+        "liberal"), "lowpass_hz" (float, fixed by the multiverse template
+        to src.config.MULTIVERSE_LOWPASS_HZ = 40.0, permanently; not
+        itself a forking decision node).
 
     Returns
     -------
