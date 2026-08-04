@@ -21,6 +21,7 @@ import pandas as pd
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS, EVENT_SOURCE
 from src.qc import log_qc
+from src.resume import stage_already_done
 from src.gait_cycles import (
     load_motion,
     heel_relative_signal,
@@ -54,6 +55,13 @@ for SUBJECT in SUBJECTS:
         cycles_out  = dirs["gait_events"] / f"sub-{SUBJECT}_cycles.tsv"
         qc_out      = dirs["gait_events"] / f"sub-{SUBJECT}_gait_qc.png"
         segment_out = dirs["gait_events"] / f"sub-{SUBJECT}_segment_10s.png"
+
+        if stage_already_done(
+            [events_out, cycles_out],
+            validate=lambda: pd.read_csv(cycles_out, sep="\t"),
+        ):
+            print(f"  Already complete -- skipping sub-{SUBJECT}")
+            continue
 
         do_plots = False
         L_filt = R_filt = lhs = lto = rhs = rto = None
