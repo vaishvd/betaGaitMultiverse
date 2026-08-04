@@ -20,6 +20,27 @@ import numpy as np
 import mne
 from pathlib import Path
 
+# mne.viz.plot_topomap's projection sphere, made explicit rather than
+# left to sphere='auto'/'eeglab'. This montage's fiducials (LPA/RPA/
+# Nasion) sit exactly at z=0 in this coordinate frame, i.e. (0, 0, 0) IS
+# MNE/Neuromag's own head-frame origin here -- not a custom value. But
+# the electrode cloud is a realistic (non-spherical) head shape: ear-
+# level channels sit at radius ~0.09-0.093 from that origin while vertex
+# channels (Cz, CPz, Fz...) sit out at ~0.14. Least-squares sphere fits
+# ('auto') and horizon fits ('eeglab') both try to fit ONE sphere to that
+# whole elongated cloud and get dragged upward (center z~+0.04) by the
+# many far-out superior channels -- confirmed by comparing sensor-only
+# renders under 'auto'/'eeglab' (electrodes bunch inward, well short of
+# the head outline) vs this origin sphere (electrodes fill the outline
+# uniformly, matching known landmarks: Cz central, Fz anterior, Oz
+# posterior, T7/T8 lateral). 0.095 m is the nominal adult head radius
+# already used when these positions were built (HEAD_RADIUS_M in
+# src/pipeline_steps.py). This is a display/projection choice only; it
+# does not touch channel positions, ROI weights (linear_roi_weights
+# below uses raw 3D distances, no sphere), or any ERSP/statistical
+# computation.
+TOPOMAP_SPHERE = (0.0, 0.0, 0.0, 0.095)
+
 
 def linear_roi_weights(
     info: mne.Info,
@@ -154,6 +175,7 @@ def plot_weight_topography(
         cmap="Reds",
         vlim=(0, weights.max()),
         contours=4,
+        sphere=TOPOMAP_SPHERE,
     )
     ax.set_title(
         f"sub-{subject}  Linear ROI weights\n"
