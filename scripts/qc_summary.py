@@ -2,11 +2,13 @@
 Aggregate per-subject QC records into a group summary TSV.
 
 Run after all subjects have been processed:
-    python scripts/utils/qc_summary.py
+    python scripts/qc_summary.py
 
-Reads all *_qc.json files from the QC directory and writes:
-    results/pipeline/qc/qc_summary.tsv   -- one row per subject per stage
-    results/pipeline/qc/qc_flags.tsv     -- one row per subject, one column per stage flag
+Reads all *_qc.json files from the active dataset's QC directory
+(src.config.DIR_QC, results/pipeline/<dataset>/qc/) and writes, into that
+same per-dataset directory:
+    <dataset>_qc_summary.tsv   -- one row per subject per stage
+    <dataset>_qc_flags.tsv     -- one row per subject, one column per stage flag
 """
 
 from pathlib import Path
@@ -20,7 +22,7 @@ dirs = get_dataset_dirs(DATASET)
 QC_DIR = dirs["qc"]
 
 # Full summary
-summary_path = DIR_QC / "qc_summary.tsv"
+summary_path = DIR_QC / f"{DATASET}_qc_summary.tsv"
 df = write_qc_summary(QC_DIR, summary_path)
 
 if df.empty:
@@ -33,7 +35,7 @@ else:
         values="flag",
         aggfunc="first"
     ).reset_index()
-    flags_path = DIR_QC / "qc_flags.tsv"
+    flags_path = DIR_QC / f"{DATASET}_qc_flags.tsv"
     flags.to_csv(flags_path, sep="\t", index=False)
     print(f"  Flag table -> {flags_path}")
 

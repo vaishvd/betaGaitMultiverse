@@ -122,14 +122,30 @@ del _name
 # --- Canonical pipeline settings (dataset-agnostic) ---
 # ASR (Artifact Subspace Reconstruction) is applied after bad-channel
 # interpolation and before average reference.
-# Set USE_ASR = True to enable in the canonical pipeline.
-# Default is False: ASR attenuated the stance/swing beta difference
-# in the multiverse analysis (group t: 1.80 → 0.60) on stepUpAms, so the
-# canonical pipeline uses the more conservative non-ASR result by
-# default for every dataset.
+#
+# HISTORY -- ASR was OFF (USE_ASR=False) from the commit that introduced
+# it through the reference pipeline's originally validated results
+# (stepUpAms t(16)=5.098, Jacobsen t(17)=2.500): ASR attenuated the
+# stance/swing beta difference in the multiverse analysis (group t:
+# 1.80 -> 0.60) on stepUpAms, so the canonical pipeline used the more
+# conservative non-ASR result by default. Those no-ASR results are
+# preserved under the "_noasr" filename suffix (e.g.
+# stepup_betaphase_stats_noasr.txt) -- NOT "_asr30", since ASR was never
+# actually applied at cutoff=30 or any other value for either dataset;
+# ASR_CUTOFF=30.0 sat unused below this flag the whole time.
+#
+# CURRENT -- USE_ASR=True, ASR_CUTOFF=20.0 for BOTH datasets: the
+# reference pipeline now deliberately matches one specific vertex of the
+# stepUpAms 27-universe multiverse grid (asr_mode="sd20"), so the
+# reference pipeline's own preprocessing reproduces a real multiverse
+# universe's numbers as an internal consistency check. Applies
+# identically to stepUpAms and Jacobsen (this flag is dataset-agnostic).
+# Does not affect the multiverse itself, which sets its own three
+# asr_mode arms independently (mulana01_create_multiverse.py) and is
+# untouched by this constant.
 # See: Mullen et al. 2015 IEEE TBME; Gorjan et al. 2022 J Neural Eng
-USE_ASR    = False
-ASR_CUTOFF = 30.0   # SD threshold; 20-30 recommended for walking EEG
+USE_ASR    = True
+ASR_CUTOFF = 20.0   # SD threshold; 20-30 recommended for walking EEG
 
 MULTIVERSE_NAME = "beta_gait_multiverse"
 

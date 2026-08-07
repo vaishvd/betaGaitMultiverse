@@ -12,6 +12,7 @@ def apply_asr_node(
     win_len: float = 0.5,
     win_overlap: float = 0.66,
     method: str = "euclid",
+    mem_splits: int = 30,
 ) -> mne.io.BaseRaw:
     """
     Optionally apply ASR to a preprocessed raw recording.
@@ -47,6 +48,18 @@ def apply_asr_node(
         Calibration window overlap fraction.
     method : str
         Covariance estimator: 'euclid' or 'riemann'.
+    mem_splits : int
+        Passed through to asrpy's ASR.transform(): splits the transform
+        into this many sequential chunks (state carried across chunks via
+        asrpy's internal Zi/cov/carry, so the output is identical
+        regardless of the split count -- this is a pure memory/speed
+        tradeoff, not an algorithm change). Default raised from asrpy's
+        own default of 3 to 30 (2026-08-05): stepUpAms's ~8min recordings
+        never needed this, but Jacobsen's ~50min recordings made
+        asr.transform's internal per-chunk covariance array (shape
+        C x C x chunk_len) exceed available RAM even at mem_splits=3
+        (~16-18 GiB peak on this dataset) -- see the ASR=20 reference
+        task's investigation. mem_splits=30 divides that peak by ~10x.
 
     Returns
     -------
@@ -70,4 +83,4 @@ def apply_asr_node(
     )
     fit_target = calib_raw if calib_raw is not None else raw
     asr.fit(fit_target)
-    return asr.transform(raw)   # returns cleaned Raw copy; input unchanged
+    return asr.transform(raw, mem_splits=mem_splits)   # returns cleaned Raw copy; input unchanged

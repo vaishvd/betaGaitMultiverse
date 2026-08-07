@@ -21,6 +21,8 @@ d04_gaitepochs/  sub-{sub}_gait_segments.npy   object array (n_cycles,), each (n
                  sub-{sub}_cycles_kept.tsv      TSV of kept cycle metadata
 """
 
+import sys
+
 import numpy as np
 import pandas as pd
 import mne
@@ -31,6 +33,11 @@ from src.qc import log_qc
 from src.resume import stage_already_done
 
 AMP_THRESH = 350e-6  # V
+
+# Optional: restrict this invocation to a single subject (see
+# prepana02_raw2ica.py's identical mechanism).
+if len(sys.argv) > 1:
+    SUBJECTS = [sys.argv[1]]
 
 dirs = get_dataset_dirs(DATASET)
 

@@ -26,6 +26,8 @@ d02_prep/
     sub-{sub}_ica.fif                  fitted ICA (no components excluded)
 """
 
+import sys
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -38,6 +40,16 @@ from src.pipeline_steps import load_and_concatenate, preprocess_raw, fit_ica
 from src.ica_utils import save_ica_component_plots
 from src.qc import log_qc
 from src.resume import stage_already_done
+
+# Optional: restrict this invocation to a single subject, e.g.
+#   python scripts/prepana02_raw2ica.py 008
+# Lets a caller run one subject per fresh interpreter (see the ASR=20
+# Jacobsen re-run, where a single long-lived process degraded across
+# subjects -- escalating AutoReject+ICA time per subject, 43->125min over
+# 7 subjects, then 700+min with no output on the 8th). Default (no arg)
+# is unchanged: process every subject in SUBJECTS, as always.
+if len(sys.argv) > 1:
+    SUBJECTS = [sys.argv[1]]
 
 L_FREQ       = 1.0   # Hz — canonical pipeline high-pass
 H_FREQ       = 60.0  # Hz — canonical pipeline low-pass

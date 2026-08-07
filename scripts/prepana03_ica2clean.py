@@ -23,6 +23,8 @@ d03_clean/
     sub-{sub}_clean-ica.fif                 ICA with exclusions
 """
 
+import sys
+
 import mne
 import numpy as np
 
@@ -35,6 +37,13 @@ from src.resume import stage_already_done
 
 # Components below this threshold (or labelled as non-brain) are excluded.
 BRAIN_THRESH = 0.7
+
+# Optional: restrict this invocation to a single subject (see
+# prepana02_raw2ica.py's identical mechanism -- one fresh process per
+# subject, for datasets/machines where a long-lived process degrades
+# across subjects).
+if len(sys.argv) > 1:
+    SUBJECTS = [sys.argv[1]]
 
 dirs      = get_dataset_dirs(DATASET)
 PREP_DIR  = dirs["prep"]

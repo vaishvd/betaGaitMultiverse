@@ -27,6 +27,8 @@ d05_ersp/
 """
 
 import json
+import sys
+
 import numpy as np
 import pandas as pd
 import mne
@@ -116,8 +118,18 @@ with open(ERSP_DIR / "group_gait_event_anchors.json", "w") as _f:
     }, _f, indent=2)
 print(f"  Saved -> group_gait_event_anchors.json")
 
+# Optional: restrict the PER-SUBJECT loop below to a single subject (see
+# prepana02_raw2ica.py's identical mechanism) -- but the group-anchor
+# pooling above always uses the full SUBJECTS list regardless, since the
+# anchors must be pooled across every subject's cycles, not just the one
+# being processed in this invocation. Every single-subject invocation
+# harmlessly recomputes and rewrites the same (deterministic) anchors
+# file before processing its own subject.
+LOOP_SUBJECTS = SUBJECTS
+if len(sys.argv) > 1:
+    LOOP_SUBJECTS = [sys.argv[1]]
 
-for subject in SUBJECTS:
+for subject in LOOP_SUBJECTS:
     try:
         print(f"ERSP: sub-{subject}")
 
@@ -401,4 +413,4 @@ for subject in SUBJECTS:
         continue
 
 print("\nDone")
-print(f"\nDone. Processed {len(SUBJECTS)} subject(s): {SUBJECTS}")
+print(f"\nDone. Processed {len(LOOP_SUBJECTS)} subject(s): {LOOP_SUBJECTS}")
