@@ -359,10 +359,22 @@ def preprocess_raw(
         calib_dur = calib.times[-1] - calib.times[0]
         print(f"  sub-{subject}: ASR calibration duration = "
               f"{calib_dur:.1f}s")
-        if calib_dur < 120.0:
+        # Floor lowered from 120.0 to 115.0 (2026-08-05): Jacobsen's
+        # validated standing baseline (config_jacobsen.BASELINE_DURATION_S
+        # = 120.0s, see results/pipeline/jacobsen/qc/baseline_120s_check.txt)
+        # is always exactly 118.0s after the 2.0s edge-safety trim above,
+        # for every one of its 18 subjects -- deterministically 2s short of
+        # the original 120.0 floor, so ASR could never calibrate on this
+        # dataset at all. 115.0 comfortably admits Jacobsen's deterministic
+        # 118.0s while still requiring ~2 minutes of calibration data.
+        # stepUpAms is unaffected either way -- its calibration windows run
+        # 180-187s per subject, far above both the old and new floor. The
+        # 2.0s trim itself is untouched (guards against a boundary artifact
+        # at the STAND/CS transition, unrelated to this floor).
+        if calib_dur < 115.0:
             raise RuntimeError(
                 f"sub-{subject}: ASR calibration too short "
-                f"({calib_dur:.1f}s < 120s required)"
+                f"({calib_dur:.1f}s < 115s required)"
             )
         raw = apply_asr_node(raw, apply=True,
                              calib_raw=calib, cutoff=asr_cutoff)
