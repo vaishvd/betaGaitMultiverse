@@ -53,7 +53,7 @@ from scipy.stats import ttest_1samp
 
 from src.config import (
     DATASET, DIR_PLOTS, DIR_MULTIVERSE_COMET, MULTIVERSE_LOWPASS_HZ,
-    ERSP_CMAP, ERSP_HEATMAP_VLIM,
+    ERSP_CMAP, ERSP_HEATMAP_VLIM, ROI_CENTER_CH,
 )
 from src.config import MULTIVERSE_SUBJECTS as SUBJECTS
 from src.paths import get_dataset_dirs
@@ -169,7 +169,7 @@ def subject_universe_roi_ersp(subject: str, decisions: dict) -> np.ndarray:
     )
     ersp_mean = ersp_per_cycle.mean(axis=0)   # (n_ch, n_freqs, N_POINTS)
 
-    weights = linear_roi_weights(raw_clean.info, center_ch="Cz")
+    weights = linear_roi_weights(raw_clean.info, center_ch=ROI_CENTER_CH)
     return apply_linear_roi(ersp_mean, weights)   # (n_freqs, N_POINTS)
 
 
