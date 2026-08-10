@@ -1,0 +1,30 @@
+BETA PHASE GROUP STATISTICS -- double stance vs swing
+=======================================================
+Normalization: dB relative to standing baseline
+Beta band: 13-30 Hz  (linear Cz ROI weights)
+
+Per-subject beta ROI-weighted ERSP (dB):
+  subject     double_stance       swing        diff
+  001                -2.951      -3.712       0.762
+  002                -1.878      -2.280       0.402
+  003                -2.663      -2.719       0.057
+  004                -1.279      -1.931       0.652
+  005                -2.316      -2.761       0.445
+  006                -3.635      -3.767       0.133
+  007                -2.316      -2.761       0.445
+  008                -3.642      -3.767       0.125
+  009                -1.835      -2.055       0.219
+  010                -2.848      -3.061       0.213
+  011                -2.144      -1.611      -0.533
+  012                 0.063      -1.681       1.744
+  013                -1.835      -2.055       0.219
+  014                -2.658      -3.077       0.419
+  015                -1.960      -2.346       0.386
+  016                -2.300      -2.364       0.064
+  017                -1.726      -1.605      -0.121
+  018                -2.254      -2.411       0.156
+
+Group paired t-test (double_stance - swing), n=18 subjects:
+  t(17) = 2.975   p = 0.008492
+  mean diff = +0.322 dB
+  subjects with double_stance > swing: 16/18
