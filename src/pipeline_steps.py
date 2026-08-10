@@ -21,13 +21,11 @@ from src.preprocessing import (
 from src.ica_utils import run_ica, label_and_mark_ica
 from src.nodes.asr_node import apply_asr_node
 from src.nodes.gedai_node import apply_gedai_node
-
-TARGET_SFREQ = 250
-LINE_FREQ    = 50.0
-EPOCH_DUR    = 2.0
-N_COMPONENTS = 0.99
-RANDOM_STATE = 42
-AMP_THRESH   = 350e-6
+from src.config import (
+    TARGET_SFREQ, LINE_FREQ, BAD_CHANNEL_ZSCORE, RANDOM_STATE, N_COMPONENTS,
+    ICA_METHOD, ICA_FIT_PARAMS, EPOCH_DUR, AUTOREJECT_N_INTERPOLATE,
+    ASR_EDGE_TRIM_S, ASR_CALIBRATION_FLOOR_S, ICLABEL_RULE,
+)
 
 # Approximate adult head radius (metres), used to scale Jacobsen
 # ds003039's unit-sphere electrode positions to a realistic physical
@@ -338,7 +336,7 @@ def preprocess_raw(
     data = raw.get_data()
     ptp  = np.ptp(data, axis=1)
     z    = (ptp - ptp.mean()) / (ptp.std() + 1e-12)
-    bads = [raw.ch_names[i] for i in np.where(np.abs(z) > 3.0)[0]]
+    bads = [raw.ch_names[i] for i in np.where(np.abs(z) > BAD_CHANNEL_ZSCORE)[0]]
     raw.info["bads"] = bads
     if bads:
         raw.interpolate_bads(reset_bads=True)
@@ -355,26 +353,25 @@ def preprocess_raw(
             min(stand_ann["onset"] + stand_ann["duration"],
                 raw.times[-1])
         )
-        calib = calib.crop(tmax=calib.times[-1] - 2.0)
+        calib = calib.crop(tmax=calib.times[-1] - ASR_EDGE_TRIM_S)
         calib_dur = calib.times[-1] - calib.times[0]
         print(f"  sub-{subject}: ASR calibration duration = "
               f"{calib_dur:.1f}s")
-        # Floor lowered from 120.0 to 115.0 (2026-08-05): Jacobsen's
-        # validated standing baseline (config_jacobsen.BASELINE_DURATION_S
-        # = 120.0s, see results/pipeline/jacobsen/qc/baseline_120s_check.txt)
-        # is always exactly 118.0s after the 2.0s edge-safety trim above,
-        # for every one of its 18 subjects -- deterministically 2s short of
+        # Floor lowered from 120.0 to 115.0 (2026-08-05, now
+        # src.config.ASR_CALIBRATION_FLOOR_S): Jacobsen's validated
+        # standing baseline (config_jacobsen.BASELINE_DURATION_S = 120.0s,
+        # see results/pipeline/jacobsen/qc/baseline_120s_check.txt) is
+        # always exactly 118.0s after the edge-safety trim above, for
+        # every one of its 18 subjects -- deterministically 2s short of
         # the original 120.0 floor, so ASR could never calibrate on this
         # dataset at all. 115.0 comfortably admits Jacobsen's deterministic
         # 118.0s while still requiring ~2 minutes of calibration data.
         # stepUpAms is unaffected either way -- its calibration windows run
-        # 180-187s per subject, far above both the old and new floor. The
-        # 2.0s trim itself is untouched (guards against a boundary artifact
-        # at the STAND/CS transition, unrelated to this floor).
-        if calib_dur < 115.0:
+        # 180-187s per subject, far above both the old and new floor.
+        if calib_dur < ASR_CALIBRATION_FLOOR_S:
             raise RuntimeError(
                 f"sub-{subject}: ASR calibration too short "
-                f"({calib_dur:.1f}s < 115s required)"
+                f"({calib_dur:.1f}s < {ASR_CALIBRATION_FLOOR_S:.0f}s required)"
             )
         raw = apply_asr_node(raw, apply=True,
                              calib_raw=calib, cutoff=asr_cutoff)
@@ -399,7 +396,7 @@ def preprocess_raw(
 def fit_ica(
     raw: mne.io.BaseRaw,
     subject: str,
-    brain_thresh: float = 0.7,
+    iclabel_rule: str = ICLABEL_RULE,
     ica_path: Path | None = None,
     iclean_path: Path | None = None,
     epo_path: Path | None = None,
@@ -415,7 +412,9 @@ def fit_ica(
     ----------
     raw          : preprocessed, referenced raw
     subject      : subject id for logging
-    brain_thresh : ICLabel brain probability threshold
+    iclabel_rule : {"conservative", "balanced", "liberal"} -- passed to
+                   src.ica_utils.select_ics_by_rule via label_and_mark_ica,
+                   the same rule the multiverse pipeline uses
     ica_path     : optional path to save/load ICA object (.fif)
     iclean_path  : optional path to save/load cleaned raw (.fif)
 
@@ -442,7 +441,7 @@ def fit_ica(
     drop_invalid_eeg_channels(epochs_raw)
 
     ar = AutoReject(
-        n_interpolate=[1, 2, 4],
+        n_interpolate=AUTOREJECT_N_INTERPOLATE,
         random_state=RANDOM_STATE,
         verbose=False,
     )
@@ -461,13 +460,13 @@ def fit_ica(
     ica = run_ica(
         epochs_clean,
         n_components=N_COMPONENTS,
-        method="infomax",
-        fit_params=dict(extended=True),
+        method=ICA_METHOD,
+        fit_params=ICA_FIT_PARAMS,
         random_state=RANDOM_STATE,
     )
 
     result = label_and_mark_ica(
-        ica, epochs_clean, brain_thresh=float(brain_thresh)
+        ica, epochs_clean, rule=iclabel_rule
     )
     n_brain = len(result["brain_ics"])
     if n_brain == 0:
@@ -514,8 +513,12 @@ def apply_ica(
     the cleaned raw to disk.
 
     Called by prepana03 in the canonical pipeline after visual ICA
-    inspection. The multiverse pipeline uses fit_ica() which combines
-    fitting and application in one step.
+    inspection, AND by multiverse_pipeline.run_subject_multiverse() (this
+    function, unchanged, is the shared "apply this exclusion set" step
+    for both pipelines -- see multiverse_pipeline.py's own docstring on
+    _fit_or_load_ica). fit_ica() below is the reference-pipeline-only
+    convenience wrapper that bundles fitting with a single application
+    (a previous version of this docstring had this backwards).
 
     Parameters
     ----------
@@ -546,6 +549,13 @@ def apply_ica(
         raw.interpolate_bads(reset_bads=True)
 
     if iclean_path is not None:
+        # Default fmt="single" (float32). The reference pipeline
+        # (prepana04/05) reloads THIS file from disk for every
+        # downstream stage, so it inherits the quantization;
+        # run_subject_multiverse() keeps using the in-memory `raw`
+        # returned below and never reloads this save -- see NOTES.md
+        # for the ~0.9% reference-vs-universe_17 residual this causes
+        # (confirmed benign, not fixed).
         raw.save(iclean_path, overwrite=True)
         print(f"  sub-{subject}: cleaned raw saved -> "
               f"{iclean_path.name}")

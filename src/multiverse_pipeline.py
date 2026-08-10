@@ -15,7 +15,13 @@ import mne
 from pathlib import Path
 from autoreject import AutoReject
 
-from src.config import DATASET, DIR_MULTIVERSE_BRANCHES, MULTIVERSE_TFR_FMAX
+from src.config import (
+    DATASET, DIR_MULTIVERSE_BRANCHES, MULTIVERSE_TFR_FMAX,
+    AMP_THRESH, TFR_FMIN, TFR_N_CYCLES_DIVISOR, TFR_N_POINTS, TFR_EDGE_CROP,
+    EPOCH_DUR, N_COMPONENTS, RANDOM_STATE, ICA_METHOD, ICA_FIT_PARAMS,
+    AUTOREJECT_N_INTERPOLATE, ASR_CUTOFF as REFERENCE_ASR_CUTOFF,
+    ROI_CENTER_CH, BASELINE_EDGE_TRIM_S,
+)
 from src.paths import get_dataset_dirs
 from src.preprocessing import drop_invalid_eeg_channels
 from src.pipeline_steps import load_and_concatenate, preprocess_raw, apply_ica
@@ -29,21 +35,24 @@ from src.ersp import (
     beta_roi_scalar,
 )
 
-AMP_THRESH   = 350e-6
-FREQS        = np.arange(8, int(MULTIVERSE_TFR_FMAX) + 1, dtype=float)  # 8-40 Hz, permanent
-N_CYCLES_WAV = FREQS / 2.0
-N_POINTS     = 101
-EDGE_CROP    = 0.05
-EPOCH_DUR    = 2.0
-N_COMPONENTS = 0.99
-RANDOM_STATE = 42
+# Re-exported under these names for backwards compatibility -- e.g.
+# scripts/mulana04_zoom_universes.py imports FREQS/N_CYCLES_WAV/N_POINTS/
+# EDGE_CROP/AMP_THRESH directly from this module.
+FREQS        = np.arange(TFR_FMIN, int(MULTIVERSE_TFR_FMAX) + 1, dtype=float)  # 8-40 Hz, permanent
+N_CYCLES_WAV = FREQS / TFR_N_CYCLES_DIVISOR
+N_POINTS     = TFR_N_POINTS
+EDGE_CROP    = TFR_EDGE_CROP
 
 # ASR cutoff (SD threshold) per asr_mode. Higher cutoff = more lenient:
 # asrpy/meegkit express the burst threshold directly as a multiple of the
 # calibration data's clean-window SD, so a larger multiplier tolerates
 # larger deviations before correcting them (see src/nodes/asr_node.py
 # and Gorjan et al. 2022, who recommend 20-30 for walking EEG).
-ASR_CUTOFF_BY_MODE = {"sd3": 3.0, "sd20": 20.0}
+# "sd3" has no reference-pipeline equivalent (multiverse-only arm) and
+# stays a literal; "sd20" is the same SD cutoff the reference pipeline
+# now uses (src.config.ASR_CUTOFF), imported above rather than
+# re-hardcoded, so the two can never drift apart again.
+ASR_CUTOFF_BY_MODE = {"sd3": 3.0, "sd20": REFERENCE_ASR_CUTOFF}
 
 
 def _branch_dir(subject: str, decisions: dict) -> Path:
@@ -97,7 +106,7 @@ def _fit_or_load_ica(raw, subject, branch_dir):
     epochs_raw.pick("eeg")
     drop_invalid_eeg_channels(epochs_raw)
 
-    ar = AutoReject(n_interpolate=[1, 2, 4], random_state=RANDOM_STATE, verbose=False)
+    ar = AutoReject(n_interpolate=AUTOREJECT_N_INTERPOLATE, random_state=RANDOM_STATE, verbose=False)
     ar.fit(epochs_raw)
     epochs_clean, _ = ar.transform(epochs_raw, return_log=True)
 
@@ -107,8 +116,8 @@ def _fit_or_load_ica(raw, subject, branch_dir):
     ica = run_ica(
         epochs_clean,
         n_components=N_COMPONENTS,
-        method="infomax",
-        fit_params=dict(extended=True),
+        method=ICA_METHOD,
+        fit_params=ICA_FIT_PARAMS,
         random_state=RANDOM_STATE,
     )
     probs, _ = iclabel_probabilities(ica, epochs_clean)
@@ -175,7 +184,7 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
                              min(ann["onset"] + ann["duration"], r.times[-1]))
 
     raw_stand = crop(raw_clean, "STAND")
-    stand_tmax = raw_stand.times[-1] - 2.0   # trim boundary artefact, matches prepana05
+    stand_tmax = raw_stand.times[-1] - BASELINE_EDGE_TRIM_S   # trim boundary artefact, matches prepana05
     if stand_tmax <= 0:
         raise RuntimeError(
             f"sub-{subject}: standing segment too short after trimming "
@@ -251,7 +260,7 @@ def run_subject_multiverse(subject: str, decisions: dict) -> dict | None:
     ersp_swing         = ersp_per_cycle[:, :, :, swing_idx].mean(axis=(0, -1))          # (n_ch, n_freqs)
 
     # Linear Cz-ROI beta-band reduction -- same as prepana07
-    weights = linear_roi_weights(raw_clean.info, center_ch="Cz")
+    weights = linear_roi_weights(raw_clean.info, center_ch=ROI_CENTER_CH)
     beta_double_stance = beta_roi_scalar(ersp_double_stance, weights, FREQS)
     beta_swing          = beta_roi_scalar(ersp_swing,         weights, FREQS)
 

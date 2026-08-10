@@ -71,11 +71,23 @@ if NORMALIZATION not in ("gpm", "standing"):
 #                            validated multiverse.
 #   MULTIVERSE_LOWPASS_HZ -- multiverse's own fixed lowpass_hz decision
 #                            (mulana01_create_multiverse.py's analysis_
-#                            template). Permanently 40.0, unchanged from
-#                            the original validated multiverse.
+#                            template). Changed 40.0 -> 60.0 (2026-08-07):
+#                            this was the last remaining reference-vs-
+#                            multiverse divergence (ICLabel logic and
+#                            gait-event anchors already unified/frozen in
+#                            the prior two tasks) -- raised to match the
+#                            reference pipeline's own fixed raw lowpass
+#                            (prepana02_raw2ica.py's H_FREQ=60.0) so the
+#                            reference pipeline becomes reproducible as a
+#                            real universe (HP=1, ASR=sd20, IC=balanced,
+#                            now lowpass=60) rather than merely
+#                            "coincidentally close" to one. The original
+#                            40.0-validated multiverse is archived intact
+#                            at results/multiverse/stepup_40hz_archive/
+#                            before this change, never overwritten.
 PIPELINE_TFR_FMAX     = 60.0
 MULTIVERSE_TFR_FMAX   = 40.0
-MULTIVERSE_LOWPASS_HZ = 40.0
+MULTIVERSE_LOWPASS_HZ = 60.0
 
 # --- Shared plotting constants (display-only -- never read by any ERSP,
 # ROI-weight, or statistical computation; changing these cannot change
@@ -108,6 +120,83 @@ ERSP_CMAP         = "RdBu_r"
 ERSP_HEATMAP_VLIM = 3.0
 BETA_TOPO_VLIM    = 4.0
 
+# --- Centralized static analysis parameters (2026-08-07) -------------------
+# Audited every hardcoded analysis parameter across scripts/ and src/ for
+# duplicate definitions -- the same class of bug that caused the ICLabel
+# rule mismatch between the reference pipeline and the multiverse (the
+# reference used to hand-roll its own compound label==brain-and-prob
+# condition instead of calling select_ics_by_rule("balanced"), silently
+# drifting from the multiverse's logic; see git history same day this
+# block was added). Collapsing everything below to one place means there
+# is now exactly one location to change any of these. NO VALUE CHANGED
+# by this consolidation -- every constant keeps the value it already had
+# at its old, now-removed definition site(s).
+#
+# NOT unified here (each is an intentional, currently-under-review split,
+# not a latent bug -- reported separately, left alone on purpose):
+#   - PIPELINE_TFR_FMAX (60, reference) vs MULTIVERSE_TFR_FMAX (40,
+#     multiverse) -- already separate config constants above.
+#   - The reference's fixed raw lowpass filter (60 Hz --
+#     scripts/prepana02_raw2ica.py's H_FREQ) vs MULTIVERSE_LOWPASS_HZ,
+#     above -- RESOLVED 2026-08-07, both now 60 Hz (see the comment on
+#     MULTIVERSE_LOWPASS_HZ above for why and where the 40 Hz multiverse
+#     is archived). H_FREQ itself stays a local literal in
+#     prepana02_raw2ica.py, not centralized here, since it and
+#     MULTIVERSE_LOWPASS_HZ are conceptually two independent fixed
+#     decisions that now happen to agree, not one shared constant.
+#   - ASR_CUTOFF_BY_MODE["sd3"] (multiverse-only, no reference
+#     equivalent) stays in src/multiverse_pipeline.py; only its "sd20"
+#     entry now imports ASR_CUTOFF from here instead of re-hardcoding 20.0.
+#   - EPOCH_DUR (AutoReject/ICA-fit epoching) vs BASELINE_EPOCH_DUR_S
+#     (standing-baseline power epoching, src.ersp.compute_standing_
+#     baseline's own default) -- both happened to be 2.0s, but they are
+#     different decisions applied to different signals; kept as two
+#     separate constants rather than silently merged, exactly to avoid
+#     inventing a coupling that was never actually there.
+#   - ASR_EDGE_TRIM_S (trims the END of the ASR calibration window) vs
+#     BASELINE_EDGE_TRIM_S (trims the END of the standing-baseline
+#     window) -- same reasoning: coincidentally both 2.0s, different
+#     purposes, kept separate.
+#   - Multiverse decision-node VALUES themselves (highpass_hz forks
+#     0.5/1.0/2.0, asr_mode forks off/sd3/sd20, iclabel_rule forks
+#     conservative/balanced/liberal) stay in mulana01_create_multiverse.py
+#     -- that is the multiverse's design-space definition, not a fixed
+#     pipeline setting subject to accidental drift.
+
+TARGET_SFREQ             = 250        # Hz -- canonical resample rate (src.pipeline_steps.preprocess_raw)
+LINE_FREQ                = 50.0       # Hz -- notch filter (EU mains)
+BAD_CHANNEL_ZSCORE       = 3.0        # peak-to-peak z-score threshold for bad-channel interpolation
+
+RANDOM_STATE             = 42         # shared by AutoReject and ICA fit, both pipelines
+N_COMPONENTS             = 0.99       # ICA: fraction of variance explained
+ICA_METHOD               = "infomax"
+ICA_FIT_PARAMS           = {"extended": True}
+ICA_DECIM                = 2          # mne.preprocessing.ICA.fit(..., decim=...)
+EPOCH_DUR                = 2.0        # s -- fixed-length epochs for AutoReject + ICA fit
+AUTOREJECT_N_INTERPOLATE = [1, 2, 4]
+
+ASR_WIN_LEN              = 0.5
+ASR_WIN_OVERLAP          = 0.66
+ASR_METHOD               = "euclid"
+ASR_MEM_SPLITS           = 30         # asrpy transform() memory-chunking -- no effect on output, see src/nodes/asr_node.py
+ASR_CALIBRATION_FLOOR_S  = 115.0      # min clean-calibration duration after edge trim (was 120; lowered for Jacobsen's deterministic 118s -- see ASR=20 task)
+ASR_EDGE_TRIM_S          = 2.0        # trimmed off the END of the ASR calibration window
+
+ICLABEL_RULE             = "balanced" # reference pipeline's fixed rule (src.ica_utils.select_ics_by_rule)
+
+AMP_THRESH               = 350e-6     # V -- shared gait-cycle / baseline-epoch rejection amplitude
+BASELINE_EPOCH_DUR_S     = 2.0        # s -- fixed-length epochs for standing-baseline Morlet power (src.ersp.compute_standing_baseline)
+BASELINE_EDGE_TRIM_S     = 2.0        # trimmed off the END of the standing-baseline window (boundary artefact)
+
+BETA_FMIN                = 13.0       # Hz -- beta band, both pipelines (src.ersp.beta_roi_scalar)
+BETA_FMAX                = 30.0
+TFR_FMIN                 = 8.0        # Hz -- TFR floor, both pipelines (ceiling is PIPELINE_TFR_FMAX / MULTIVERSE_TFR_FMAX above)
+TFR_N_CYCLES_DIVISOR     = 2.0        # n_cycles = freq / this, both pipelines
+TFR_N_POINTS             = 101        # gait-cycle grid resolution (0-100% in 1% steps)
+TFR_EDGE_CROP            = 0.05       # fraction trimmed at each edge post-TFR
+
+ROI_CENTER_CH            = "Cz"       # linear ROI weighting center electrode
+
 _active = _PER_DATASET[ACTIVE_DATASET]
 
 # Re-export every public attribute of the active per-dataset config
@@ -134,8 +223,8 @@ del _name
 # actually applied at cutoff=30 or any other value for either dataset;
 # ASR_CUTOFF=30.0 sat unused below this flag the whole time.
 #
-# CURRENT -- USE_ASR=True, ASR_CUTOFF=20.0 for BOTH datasets: the
-# reference pipeline now deliberately matches one specific vertex of the
+# CURRENT -- USE_ASR=True, ASR_CUTOFF=20.0 by default for BOTH datasets:
+# the reference pipeline deliberately matches one specific vertex of the
 # stepUpAms 27-universe multiverse grid (asr_mode="sd20"), so the
 # reference pipeline's own preprocessing reproduces a real multiverse
 # universe's numbers as an internal consistency check. Applies
@@ -144,7 +233,13 @@ del _name
 # asr_mode arms independently (mulana01_create_multiverse.py) and is
 # untouched by this constant.
 # See: Mullen et al. 2015 IEEE TBME; Gorjan et al. 2022 J Neural Eng
-USE_ASR    = True
+#
+# BETAGAIT_USE_ASR env var override (2026-08-09) -- same pattern as
+# NORMALIZATION above: lets one dataset's reference re-run flip ASR off
+# per-invocation (e.g. for stepUpAms's ASR-off/standing-baseline
+# reference variant) without changing the shared default, so Jacobsen
+# (or any run without the env var set) is completely unaffected.
+USE_ASR    = os.environ.get("BETAGAIT_USE_ASR", "true").lower() not in ("false", "0", "no")
 ASR_CUTOFF = 20.0   # SD threshold; 20-30 recommended for walking EEG
 
 MULTIVERSE_NAME = "beta_gait_multiverse"
