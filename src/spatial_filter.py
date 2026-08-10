@@ -20,6 +20,8 @@ import numpy as np
 import mne
 from pathlib import Path
 
+from src.config import ROI_CENTER_CH
+
 # mne.viz.plot_topomap's projection sphere, made explicit rather than
 # left to sphere='auto'/'eeglab'. This montage's fiducials (LPA/RPA/
 # Nasion) sit exactly at z=0 in this coordinate frame, i.e. (0, 0, 0) IS
@@ -44,7 +46,7 @@ TOPOMAP_SPHERE = (0.0, 0.0, 0.0, 0.095)
 
 def linear_roi_weights(
     info: mne.Info,
-    center_ch: str = "Cz",
+    center_ch: str = ROI_CENTER_CH,
 ) -> np.ndarray:
     """
     Compute linear distance weights centered on a reference channel.
@@ -151,7 +153,7 @@ def plot_weight_topography(
     info: mne.Info,
     subject: str,
     out_path: Path,
-    center_ch: str = "Cz",
+    center_ch: str = ROI_CENTER_CH,
 ) -> None:
     """
     Save a topography plot of the linear ROI weights.
