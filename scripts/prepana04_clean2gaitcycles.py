@@ -28,11 +28,9 @@ import pandas as pd
 import mne
 
 from src.paths import get_dataset_dirs
-from src.config import DATASET, SUBJECTS
+from src.config import DATASET, SUBJECTS, AMP_THRESH
 from src.qc import log_qc
 from src.resume import stage_already_done
-
-AMP_THRESH = 350e-6  # V
 
 # Optional: restrict this invocation to a single subject (see
 # prepana02_raw2ica.py's identical mechanism).

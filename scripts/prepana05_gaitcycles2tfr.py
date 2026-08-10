@@ -26,7 +26,6 @@ d05_ersp/
     sub-{sub}_ersp_beta.npy           shape (n_ch, n_freqs, N_POINTS)
 """
 
-import json
 import sys
 
 import numpy as np
@@ -34,16 +33,22 @@ import pandas as pd
 import mne
 
 from src.paths import get_dataset_dirs
-from src.config import DATASET, SUBJECTS, PIPELINE_TFR_FMAX
+from src.config import (
+    DATASET, SUBJECTS, PIPELINE_TFR_FMAX, TFR_FMIN, TFR_N_CYCLES_DIVISOR,
+    TFR_N_POINTS, TFR_EDGE_CROP, AMP_THRESH, ROI_CENTER_CH,
+)
 from src.qc import log_qc
 from src.resume import stage_already_done
 from src.spatial_filter import linear_roi_weights, apply_linear_roi, plot_weight_topography
-from src.ersp import warp_cycle_to_grid, phase_split_indices, compute_standing_baseline
+from src.ersp import (
+    warp_cycle_to_grid, phase_split_indices, compute_standing_baseline,
+    load_group_anchors,
+)
 
-FREQS    = np.arange(8, int(PIPELINE_TFR_FMAX) + 1, dtype=float)  # 8-60 Hz, permanent (alpha-beta-gamma)
-N_CYCLES = FREQS / 2.0                      # frequency-dependent wavelet width
-N_POINTS = 101  # 0-100% gait cycle in 1% steps; below native resolution (~248 samples at 250 Hz), avoids upsampling artefacts
-EDGE_CROP = 0.05                            # fraction trimmed at each edge post-TFR
+FREQS    = np.arange(TFR_FMIN, int(PIPELINE_TFR_FMAX) + 1, dtype=float)  # 8-60 Hz, permanent (alpha-beta-gamma)
+N_CYCLES = FREQS / TFR_N_CYCLES_DIVISOR     # frequency-dependent wavelet width
+N_POINTS = TFR_N_POINTS  # 0-100% gait cycle in 1% steps; below native resolution (~248 samples at 250 Hz), avoids upsampling artefacts
+EDGE_CROP = TFR_EDGE_CROP                   # fraction trimmed at each edge post-TFR
 
 # Note on edge artefacts: at 13 Hz with n_cycles=6.5, the wavelet window
 # is ~500 ms. Mean cycle duration is ~992 ms, so edge contamination extends
@@ -53,8 +58,8 @@ EDGE_CROP = 0.05                            # fraction trimmed at each edge post
 # This is flagged as a limitation; multiverse will fork on EDGE_CROP.
 # See: Cohen 2014 "Analyzing Neural Time Series Data", MIT Press, Ch. 13
 
-AMP_THRESH_BASELINE = 350e-6
-AMP_THRESH_CYCLE    = 350e-6
+AMP_THRESH_BASELINE = AMP_THRESH
+AMP_THRESH_CYCLE    = AMP_THRESH
 
 dirs = get_dataset_dirs(DATASET)
 
@@ -65,58 +70,24 @@ QC_DIR        = dirs["qc"]
 ROI_TOPO_DIR  = dirs["roi_topo"]
 
 
-# --- Group-median gait-event anchors (computed once, pooled across every
-# subject's kept cycles, before the per-subject loop) ---
-# Pooling all cycles from all subjects together (rather than taking the
-# median of each subject's median) is the simpler option and is used here;
-# it weights every cycle equally instead of every subject equally.
+# --- Group-median gait-event anchors: FROZEN calibration input --------
 # These anchors define where LTO/LHS/RTO fall on the common 0-100% gait
 # cycle grid. They are used below (a) to warp each cycle's power time
 # series with a 4-segment piecewise-linear map instead of a single
 # endpoint-only stretch, and (b) to define the double-stance/swing phase
 # windows on the resulting fixed grid.
-_f_lto, _f_lhs, _f_rto = [], [], []
-for _subject in SUBJECTS:
-    _meta_path = GAITEPOCH_DIR / f"sub-{_subject}_cycles_kept.tsv"
-    if not _meta_path.exists():
-        continue
-    _meta = pd.read_csv(_meta_path, sep="\t")
-    if len(_meta) == 0:
-        continue
-    _dur = _meta["rhs_end_s"] - _meta["rhs_start_s"]
-    _f_lto.append(((_meta["lto_s"] - _meta["rhs_start_s"]) / _dur).values)
-    _f_lhs.append(((_meta["lhs_s"] - _meta["rhs_start_s"]) / _dur).values)
-    _f_rto.append(((_meta["rto_s"] - _meta["rhs_start_s"]) / _dur).values)
-
-if not _f_lto:
-    raise RuntimeError(
-        "No sub-*_cycles_kept.tsv files found in GAITEPOCH_DIR -- "
-        "cannot compute group gait-event anchors. Run prepana04 first."
-    )
-
-A_lto = float(np.median(np.concatenate(_f_lto))) * 100
-A_lhs = float(np.median(np.concatenate(_f_lhs))) * 100
-A_rto = float(np.median(np.concatenate(_f_rto))) * 100
-
-n_subjects_pooled = len(_f_lto)
-n_cycles_pooled   = sum(len(a) for a in _f_lto)
-
-assert 0 < A_lto < A_lhs < A_rto < 100, \
-    f"Group anchors are not monotonic: A_lto={A_lto}, A_lhs={A_lhs}, A_rto={A_rto}"
-
-print(f"Group-median gait-event anchors "
-      f"(pooled across {n_subjects_pooled} subjects, {n_cycles_pooled} cycles):")
+#
+# Read-only as of 2026-08-07: this used to be computed and OVERWRITTEN
+# here on every run, pooled across whatever subjects/settings happened
+# to be active that run. That silent recompute is what caused a same-day
+# mismatch between a cached multiverse universe and a fresh reference
+# re-run (different anchors, not different code -- see the ASR=20
+# pre-flight task's multiverse cross-check). Anchors are now frozen in
+# group_gait_event_anchors_frozen.json and only ever changed by
+# deliberately running scripts/freeze_gait_anchors.py by hand.
+A_lto, A_lhs, A_rto = load_group_anchors(ERSP_DIR)
+print(f"Group-median gait-event anchors (frozen calibration input):")
 print(f"  A_lto = {A_lto:.2f}%   A_lhs = {A_lhs:.2f}%   A_rto = {A_rto:.2f}%")
-
-with open(ERSP_DIR / "group_gait_event_anchors.json", "w") as _f:
-    json.dump({
-        "A_lto_pct":         A_lto,
-        "A_lhs_pct":         A_lhs,
-        "A_rto_pct":         A_rto,
-        "n_subjects_pooled": n_subjects_pooled,
-        "n_cycles_pooled":   n_cycles_pooled,
-    }, _f, indent=2)
-print(f"  Saved -> group_gait_event_anchors.json")
 
 # Optional: restrict the PER-SUBJECT loop below to a single subject (see
 # prepana02_raw2ica.py's identical mechanism) -- but the group-anchor
@@ -297,13 +268,13 @@ for subject in LOOP_SUBJECTS:
         # prepana06_plotbetagait.py — the full per-channel ERSP is preserved.
         _info = concat_raw.info
         try:
-            weights = linear_roi_weights(_info, center_ch="Cz")
+            weights = linear_roi_weights(_info, center_ch=ROI_CENTER_CH)
             np.save(out_weights, weights)
 
             plot_weight_topography(
                 weights, _info, subject,
                 out_path  = ROI_TOPO_DIR / f"sub-{subject}_roi_weights_topo.png",
-                center_ch = "Cz",
+                center_ch = ROI_CENTER_CH,
             )
             print(f"  ROI weights saved  max_ch={_info.ch_names[weights.argmax()]}  "
                   f"max_w={weights.max():.4f}")

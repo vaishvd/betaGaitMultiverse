@@ -29,14 +29,11 @@ import mne
 import numpy as np
 
 from src.paths import get_dataset_dirs
-from src.config import DATASET, SUBJECTS
+from src.config import DATASET, SUBJECTS, ICLABEL_RULE
 from src.pipeline_steps import apply_ica
 from src.ica_utils import label_and_mark_ica
 from src.qc import log_qc
 from src.resume import stage_already_done
-
-# Components below this threshold (or labelled as non-brain) are excluded.
-BRAIN_THRESH = 0.7
 
 # Optional: restrict this invocation to a single subject (see
 # prepana02_raw2ica.py's identical mechanism -- one fresh process per
@@ -96,7 +93,7 @@ for subject in SUBJECTS:
 
         # IC classification and rejection
 
-        result = label_and_mark_ica(ica, epochs, brain_thresh=BRAIN_THRESH)
+        result = label_and_mark_ica(ica, epochs, rule=ICLABEL_RULE)
 
         print(f"\n  Brain ICs kept   : {len(result['brain_ics'])}  "
               f"{result['brain_ics']}")

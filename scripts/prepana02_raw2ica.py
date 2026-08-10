@@ -35,7 +35,7 @@ import mne
 import numpy as np
 
 from src.paths import get_dataset_dirs
-from src.config import DATASET, SUBJECTS, USE_ASR, ASR_CUTOFF
+from src.config import DATASET, SUBJECTS, USE_ASR, ASR_CUTOFF, ICLABEL_RULE
 from src.pipeline_steps import load_and_concatenate, preprocess_raw, fit_ica
 from src.ica_utils import save_ica_component_plots
 from src.qc import log_qc
@@ -51,9 +51,15 @@ from src.resume import stage_already_done
 if len(sys.argv) > 1:
     SUBJECTS = [sys.argv[1]]
 
-L_FREQ       = 1.0   # Hz — canonical pipeline high-pass
-H_FREQ       = 60.0  # Hz — canonical pipeline low-pass
-BRAIN_THRESH = 0.7   # ICLabel brain probability threshold
+# L_FREQ/H_FREQ intentionally stay local literals, NOT centralized into
+# src.config, per the parameter-consolidation audit (2026-08-07): this
+# constant and MULTIVERSE_LOWPASS_HZ are conceptually two independent
+# fixed decisions, not one shared config value, even though (as of
+# 2026-08-08) they've been deliberately set to agree -- see
+# MULTIVERSE_LOWPASS_HZ's comment in src/config.py and NOTES.md for why
+# (reference pipeline == universe_17 methodologically).
+L_FREQ = 1.0   # Hz — canonical pipeline high-pass
+H_FREQ = 60.0  # Hz — canonical pipeline low-pass (matches MULTIVERSE_LOWPASS_HZ=60, as of 2026-08-08)
 
 dirs     = get_dataset_dirs(DATASET)
 RAW_DIR  = dirs["raw"]
@@ -97,6 +103,12 @@ for subject in SUBJECTS:
 
         # Save preprocessed concatenated raw
 
+        # Default fmt="single" (float32) -- deliberately not "double".
+        # Every downstream stage reloads this file, so the reference
+        # pipeline's multi-stage disk persistence introduces a small
+        # (~0.9%, scattered both directions) float32 rounding difference
+        # vs run_subject_multiverse()'s single in-memory float64 call.
+        # Confirmed benign and left as-is -- see NOTES.md.
         raw_concat.save(concat_out, overwrite=True)
         print(f"  Saved concat raw -> {concat_out.name}")
 
@@ -120,7 +132,7 @@ for subject in SUBJECTS:
         raw_concat, ica, n_brain_ics = fit_ica(
             raw_concat,
             subject,
-            brain_thresh = BRAIN_THRESH,
+            iclabel_rule = ICLABEL_RULE,
             ica_path     = ica_save_path,
             iclean_path  = None,
             epo_path     = epo_save_path,

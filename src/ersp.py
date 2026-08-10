@@ -15,33 +15,54 @@ import mne
 import numpy as np
 
 from src.spatial_filter import apply_linear_roi
-
-BETA_FMIN, BETA_FMAX = 13.0, 30.0
+from src.config import (
+    BETA_FMIN, BETA_FMAX, TFR_N_POINTS, TFR_EDGE_CROP, AMP_THRESH,
+    BASELINE_EPOCH_DUR_S,
+)
 
 
 def load_group_anchors(ersp_dir):
     """
-    Load the group-median gait-event anchors written once by
-    prepana05_gaitcycles2tfr.py (pooled across all canonical subjects'
-    kept cycles).
+    Load the group-median gait-event anchors: a FROZEN calibration input
+    (group_gait_event_anchors_frozen.json), not recomputed here or by any
+    pipeline run.
+
+    Both the reference pipeline (prepana05_gaitcycles2tfr.py) and the
+    multiverse pipeline (multiverse_pipeline.py) call this one function,
+    so they always read the identical anchors -- this is what makes them
+    comparable at all. Before 2026-08-07 this file was silently
+    recomputed and overwritten on every prepana05 run (pooled across
+    whatever subjects/settings happened to be active that run), which is
+    what caused the reference-vs-multiverse pre-flight cross-check to
+    mismatch: the multiverse's cached result and a same-day reference
+    re-run were pooling different anchors without anyone changing any
+    code. See scripts/freeze_gait_anchors.py (run once, by hand) for how
+    this file is (re)computed if it is ever deliberately updated.
 
     Parameters
     ----------
     ersp_dir : Path
         Dataset ERSP directory (``dirs["ersp"]``) containing
-        ``group_gait_event_anchors.json``.
+        ``group_gait_event_anchors_frozen.json``.
 
     Returns
     -------
     (A_lto, A_lhs, A_rto) : tuple of float
         Percent of gait cycle (0-100) for each event anchor.
     """
-    with open(ersp_dir / "group_gait_event_anchors.json") as f:
+    frozen_path = ersp_dir / "group_gait_event_anchors_frozen.json"
+    if not frozen_path.exists():
+        raise FileNotFoundError(
+            f"{frozen_path} not found -- gait-event anchors are a frozen "
+            "calibration input, not auto-computed. Run "
+            "scripts/freeze_gait_anchors.py deliberately, once, to create it."
+        )
+    with open(frozen_path) as f:
         anchors = json.load(f)
     return anchors["A_lto_pct"], anchors["A_lhs_pct"], anchors["A_rto_pct"]
 
 
-def warp_cycle_to_grid(power, lto_idx, lhs_idx, rto_idx, anchors, n_points=101):
+def warp_cycle_to_grid(power, lto_idx, lhs_idx, rto_idx, anchors, n_points=TFR_N_POINTS):
     """
     Piecewise-linear (4-segment) time-warp of one cycle's power time
     series onto the common 0-100% grid, pinning this cycle's own
@@ -88,7 +109,7 @@ def warp_cycle_to_grid(power, lto_idx, lhs_idx, rto_idx, anchors, n_points=101):
     ])   # (n_ch, n_freqs, n_points)
 
 
-def phase_split_indices(anchors, n_points=101):
+def phase_split_indices(anchors, n_points=TFR_N_POINTS):
     """
     Fixed double-stance / swing index ranges on the common warped grid.
 
@@ -127,7 +148,7 @@ def phase_split_indices(anchors, n_points=101):
 
 
 def compute_standing_baseline(
-    raw_stand, freqs, n_cycles, edge_crop=0.05, amp_thresh=350e-6, epoch_dur=2.0,
+    raw_stand, freqs, n_cycles, edge_crop=TFR_EDGE_CROP, amp_thresh=AMP_THRESH, epoch_dur=BASELINE_EPOCH_DUR_S,
 ):
     """
     Compute standing-baseline Morlet power for ERSP normalization.

@@ -37,7 +37,7 @@ d05_ersp/
     sub-{sub}_ersp_swing.npy           (n_ch, n_freqs)          [standing mode]
     sub-{sub}_ersp_beta.npy            (n_ch, n_freqs, 101)     [gpm mode]
     sub-{sub}_roi_weights.npy          (n_ch,)
-    group_gait_event_anchors.json                               [gpm mode]
+    group_gait_event_anchors_frozen.json                        [gpm mode]
 
 Output
 ------
@@ -49,14 +49,14 @@ import numpy as np
 from scipy.stats import ttest_rel
 
 from src.paths import get_dataset_dirs
-from src.config import DATASET, SUBJECTS, DIR_QC, PIPELINE_TFR_FMAX, NORMALIZATION
+from src.config import DATASET, SUBJECTS, DIR_QC, PIPELINE_TFR_FMAX, NORMALIZATION, TFR_FMIN
 from src.spatial_filter import apply_linear_roi
 from src.ersp import (
     beta_roi_scalar, load_group_anchors, phase_split_indices,
     apply_gpm_normalization, BETA_FMIN, BETA_FMAX,
 )
 
-FREQS = np.arange(8, int(PIPELINE_TFR_FMAX) + 1, dtype=float)   # must match prepana05/06
+FREQS = np.arange(TFR_FMIN, int(PIPELINE_TFR_FMAX) + 1, dtype=float)   # must match prepana05/06
 BETA_MASK = (FREQS >= BETA_FMIN) & (FREQS <= BETA_FMAX)
 
 dirs     = get_dataset_dirs(DATASET)

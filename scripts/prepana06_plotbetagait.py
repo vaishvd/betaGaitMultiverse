@@ -44,6 +44,7 @@ from pathlib import Path
 from src.paths import get_dataset_dirs
 from src.config import (
     DATASET, SUBJECTS, DIR_PLOTS, PIPELINE_TFR_FMAX, NORMALIZATION, ERSP_CMAP,
+    TFR_FMIN, ROI_CENTER_CH,
 )
 from src.spatial_filter import linear_roi_weights, apply_linear_roi, TOPOMAP_SPHERE
 from src.ersp import (
@@ -57,7 +58,7 @@ NORM_LABEL = {
 }[NORMALIZATION]
 OUT_SUFFIX = "" if NORMALIZATION == "gpm" else "_standingBL"
 
-FREQS = np.arange(8, int(PIPELINE_TFR_FMAX) + 1)
+FREQS = np.arange(TFR_FMIN, int(PIPELINE_TFR_FMAX) + 1)
 
 dirs          = get_dataset_dirs(DATASET)
 ERSP_DIR      = dirs["ersp"]
@@ -105,7 +106,7 @@ for subject in SUBJECTS:
         if weights_path.exists():
             sub_weights = np.load(weights_path)
         else:
-            sub_weights = linear_roi_weights(raw_ref.info, center_ch="Cz")
+            sub_weights = linear_roi_weights(raw_ref.info, center_ch=ROI_CENTER_CH)
 
         # Apply weights: (n_ch, n_freqs, 101) → (n_freqs, 101)
         ersp_roi = apply_linear_roi(ersp, sub_weights)

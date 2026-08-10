@@ -7,8 +7,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
-from mne_icalabel import label_components
 from mne_icalabel.iclabel import iclabel_label_components
+
+from src.config import N_COMPONENTS, ICA_METHOD, ICA_FIT_PARAMS, ICA_DECIM, RANDOM_STATE
 
 # Column order of the raw ICLabel probability matrix
 # (mne_icalabel.label_components.ICALABEL_METHODS_NUMERICAL_TO_STRING["iclabel"]).
@@ -20,11 +21,11 @@ ICLABEL_CLASSES = [
 
 def run_ica(
     epochs: mne.Epochs,
-    n_components: float | int = 0.99,
-    method: str = "infomax",
+    n_components: float | int = N_COMPONENTS,
+    method: str = ICA_METHOD,
     fit_params: dict | None = None,
-    decim: int = 2,
-    random_state: int = 42,
+    decim: int = ICA_DECIM,
+    random_state: int = RANDOM_STATE,
 ) -> mne.preprocessing.ICA:
     """Fit Extended Infomax ICA on clean epochs and return the fitted ICA object."""
 
@@ -46,23 +47,30 @@ def run_ica(
 def label_and_mark_ica(
     ica: mne.preprocessing.ICA,
     epochs: mne.Epochs,
-    brain_thresh: float = 0.7,
+    rule: str = "balanced",
 ) -> dict:
-    """Run ICLabel on epochs, mark components below brain_thresh for exclusion, return updated ICA."""
+    """
+    Run ICLabel on epochs and mark components for exclusion, return updated ICA.
 
-    result = label_components(epochs, ica, method="iclabel")
-    labels = result["labels"]
-    probs  = result["y_pred_proba"]
+    Calls the exact same select_ics_by_rule() the multiverse pipeline uses
+    (src.multiverse_pipeline.run_subject_multiverse) so the reference
+    pipeline's component-selection logic can never drift from the
+    multiverse's again -- one function, one place the rule is defined.
+    Previously this used its own compound condition (argmax label=="brain"
+    AND max_prob>=0.7), which is NOT equivalent to select_ics_by_rule's
+    "balanced" (P(brain)>0.7 alone) -- identified as one of two causes
+    (the other: lowpass_hz) of the reference pipeline failing to reproduce
+    a matching multiverse universe's effect size even at matched
+    highpass/asr_mode/iclabel_rule settings.
+    """
+    probs, labels = iclabel_probabilities(ica, epochs)
+    exclude_ics = select_ics_by_rule(probs, rule)
+    brain_ics   = [i for i in range(len(labels)) if i not in exclude_ics]
 
-    brain_ics, exclude_ics = [], []
-
-    print("\n  ICLabel classification:")
-    for i, (label, prob_vec) in enumerate(zip(labels, probs)):
-        prob   = float(prob_vec.max())
-        keep   = label == "brain" and prob >= brain_thresh
-        marker = "+" if keep else "-"
-        print(f"    {marker}  IC{i:03d}  {label:<20}  p={prob:.2f}")
-        (brain_ics if keep else exclude_ics).append(i)
+    print(f"\n  ICLabel classification (rule={rule}):")
+    for i, label in enumerate(labels):
+        marker = "+" if i in brain_ics else "-"
+        print(f"    {marker}  IC{i:03d}  {label:<20}  p_brain={probs[i, 0]:.2f}")
 
     ica.exclude = exclude_ics
     print(f"\n  Keeping  : {len(brain_ics)} brain ICs  {brain_ics}")
