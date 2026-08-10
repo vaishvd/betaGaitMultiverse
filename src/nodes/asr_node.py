@@ -3,16 +3,18 @@
 import mne
 from asrpy import ASR
 
+from src.config import ASR_WIN_LEN, ASR_WIN_OVERLAP, ASR_METHOD, ASR_MEM_SPLITS
+
 
 def apply_asr_node(
     raw: mne.io.BaseRaw,
     apply: bool,
     calib_raw: mne.io.BaseRaw = None,
     cutoff: float = 30.0,
-    win_len: float = 0.5,
-    win_overlap: float = 0.66,
-    method: str = "euclid",
-    mem_splits: int = 30,
+    win_len: float = ASR_WIN_LEN,
+    win_overlap: float = ASR_WIN_OVERLAP,
+    method: str = ASR_METHOD,
+    mem_splits: int = ASR_MEM_SPLITS,
 ) -> mne.io.BaseRaw:
     """
     Optionally apply ASR to a preprocessed raw recording.
