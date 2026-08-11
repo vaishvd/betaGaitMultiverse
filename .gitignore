@@ -69,6 +69,7 @@ results/pipeline/jacobsen/qc/baseline_120s_check.txt
 
 # Ad-hoc run logs and throwaway launcher batch files
 *.log
+logs/
 run_jacobsen2.bat
 
 # Claude Code local tooling config
