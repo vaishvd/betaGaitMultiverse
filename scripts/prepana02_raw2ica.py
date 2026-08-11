@@ -36,8 +36,9 @@ import numpy as np
 
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS, USE_ASR, ASR_CUTOFF, ICLABEL_RULE
+from src import config
 from src.pipeline_steps import load_and_concatenate, preprocess_raw, fit_ica
-from src.ica_utils import save_ica_component_plots
+from src.ica_utils import save_ica_component_plots, select_ics_jacobsen_paper_rule
 from src.qc import log_qc
 from src.resume import stage_already_done
 
@@ -55,11 +56,31 @@ if len(sys.argv) > 1:
 # src.config, per the parameter-consolidation audit (2026-08-07): this
 # constant and MULTIVERSE_LOWPASS_HZ are conceptually two independent
 # fixed decisions, not one shared config value, even though (as of
-# 2026-08-08) they've been deliberately set to agree -- see
+# 2026-08-08) they've been deliberately set to agree for stepUpAms -- see
 # MULTIVERSE_LOWPASS_HZ's comment in src/config.py and NOTES.md for why
-# (reference pipeline == universe_17 methodologically).
-L_FREQ = 1.0   # Hz — canonical pipeline high-pass
+# (reference pipeline == universe_17 methodologically, stepUpAms only).
+#
+# Jacobsen (2026-08-10) is a deliberate exception: its reference pipeline
+# reproduces the paper's own 0.2Hz highpass instead, via
+# config_jacobsen.REFERENCE_HIGHPASS_HZ -- OFF the multiverse's highpass
+# grid {0.5,1,2} on purpose (see config_jacobsen.py's docstring). Falls
+# back to the stepUpAms literal (1.0) when that attribute isn't defined
+# for the active dataset, so stepUpAms is completely unaffected.
+L_FREQ = getattr(config, "REFERENCE_HIGHPASS_HZ", 1.0)   # Hz — canonical pipeline high-pass
 H_FREQ = 60.0  # Hz — canonical pipeline low-pass (matches MULTIVERSE_LOWPASS_HZ=60, as of 2026-08-08)
+
+# Jacobsen-only: separate, more aggressive high-pass used ONLY to fit ICA
+# (paper's ICA_bandpass_fmin=2.0Hz); None for stepUpAms (unaffected) --
+# see config_jacobsen.REFERENCE_ICA_FIT_HIGHPASS_HZ and
+# src.pipeline_steps.fit_ica's ica_fit_highpass_hz parameter.
+ICA_FIT_HIGHPASS = getattr(config, "REFERENCE_ICA_FIT_HIGHPASS_HZ", None)
+
+# Jacobsen-only: paper-exact ICLabel artifact rule (P(eye)>0.9 OR
+# P(muscle)>0.9), used INSTEAD of ICLABEL_RULE ("balanced") for this
+# dataset's reference pipeline only -- see
+# src.ica_utils.select_ics_jacobsen_paper_rule's docstring for why this
+# is a standalone function rather than a new select_ics_by_rule() branch.
+ARTIFACT_RULE_FN = select_ics_jacobsen_paper_rule if DATASET == "jacobsen" else None
 
 dirs     = get_dataset_dirs(DATASET)
 RAW_DIR  = dirs["raw"]
@@ -132,10 +153,12 @@ for subject in SUBJECTS:
         raw_concat, ica, n_brain_ics = fit_ica(
             raw_concat,
             subject,
-            iclabel_rule = ICLABEL_RULE,
-            ica_path     = ica_save_path,
-            iclean_path  = None,
-            epo_path     = epo_save_path,
+            iclabel_rule         = ICLABEL_RULE,
+            ica_path             = ica_save_path,
+            iclean_path          = None,
+            epo_path             = epo_save_path,
+            ica_fit_highpass_hz  = ICA_FIT_HIGHPASS,
+            artifact_rule_fn     = ARTIFACT_RULE_FN,
         )
 
         save_ica_component_plots(ica, PREP_DIR, subject)
@@ -163,6 +186,9 @@ for subject in SUBJECTS:
                 "n_excl_ics":   len(ica.exclude),
                 "use_asr":      bool(USE_ASR),
                 "asr_cutoff":   float(ASR_CUTOFF) if USE_ASR else None,
+                "highpass_hz":  float(L_FREQ),
+                "ica_fit_highpass_hz": ICA_FIT_HIGHPASS,
+                "iclabel_rule": ICLABEL_RULE if ARTIFACT_RULE_FN is None else "jacobsen_paper_eye_muscle",
             },
         )
         print(f"  QC preprocessing: {prep_flag}  "

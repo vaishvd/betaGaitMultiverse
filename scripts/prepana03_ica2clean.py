@@ -31,9 +31,14 @@ import numpy as np
 from src.paths import get_dataset_dirs
 from src.config import DATASET, SUBJECTS, ICLABEL_RULE
 from src.pipeline_steps import apply_ica
-from src.ica_utils import label_and_mark_ica
+from src.ica_utils import label_and_mark_ica, select_ics_jacobsen_paper_rule
 from src.qc import log_qc
 from src.resume import stage_already_done
+
+# Jacobsen-only: paper-exact ICLabel artifact rule (P(eye)>0.9 OR
+# P(muscle)>0.9) instead of ICLABEL_RULE -- see prepana02_raw2ica.py and
+# src.ica_utils.select_ics_jacobsen_paper_rule's docstring.
+ARTIFACT_RULE_FN = select_ics_jacobsen_paper_rule if DATASET == "jacobsen" else None
 
 # Optional: restrict this invocation to a single subject (see
 # prepana02_raw2ica.py's identical mechanism -- one fresh process per
@@ -93,7 +98,9 @@ for subject in SUBJECTS:
 
         # IC classification and rejection
 
-        result = label_and_mark_ica(ica, epochs, rule=ICLABEL_RULE)
+        result = label_and_mark_ica(
+            ica, epochs, rule=ICLABEL_RULE, artifact_rule_fn=ARTIFACT_RULE_FN,
+        )
 
         print(f"\n  Brain ICs kept   : {len(result['brain_ics'])}  "
               f"{result['brain_ics']}")

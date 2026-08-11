@@ -82,23 +82,91 @@ GAIT_EVENT_VALUES = {
 SEGMENT_START_VALUE = "start_easy"
 SEGMENT_END_VALUE   = "end_easy"
 
-# --- Baseline: VALIDATED ---
-# Baseline: 120 s standing window from start_restEEG onset. The
-# restEEG start/end markers in ds003039 are mislabeled (end fires
-# early), but the standing-baseline DATA is present; supervisor-
-# confirmed that the 120 s immediately after start_restEEG is the
-# correct standing baseline. Baseline is a divisive normalization
-# applied identically to both phases of the paired double-stance-vs-
-# swing contrast, so it cancels from the contrast; it affects only
-# absolute dB levels.
+# --- Baseline: VALIDATED, paper-faithful (2026-08-10) ---
+# Baseline: the dataset's own start_standing -> end_standing window (a
+# dedicated quiet-standing block the original protocol places between
+# start_restEEG and the walking task), used for BOTH (a) ASR
+# calibration and (b) ERSP/standing-baseline normalization -- see
+# src.pipeline_steps._load_and_annotate_eeglab.
 #
-# Per-subject validated (all 18 analysis subjects: a full 120 s of
-# continuous recording exists after start_restEEG onset, and that
-# window does not run into the walking task) -- see
-# scripts/diag_jacobsen_baseline_check.py and
-# results/pipeline/jacobsen/qc/baseline_120s_check.txt.
-BASELINE_START_VALUE = "start_restEEG"
-BASELINE_DURATION_S  = 120.0
+# SUPERSEDES the previous start_restEEG + fixed-120s-window baseline
+# (restEEG's end marker fires too early to trust, so a fixed duration
+# after its start was used as a workaround). start_standing/end_standing
+# are the dataset's own explicit, correctly-labeled quiet-standing
+# bounds and are the better-matched analogue of the paper's own
+# baseline. Re-verified per-subject (2026-08-10, all 18 analysis
+# subjects): both markers present exactly once, every window is exactly
+# 240.0s, and every window falls strictly between start_restEEG and
+# start_easy (never overlapping the walking task) -- see
+# results/pipeline/jacobsen/_archive_asr20_restEEG_reference/ for the
+# prior baseline's outputs, kept for comparison.
+BASELINE_START_VALUE = "start_standing"
+BASELINE_END_VALUE   = "end_standing"
+
+# --- Reference-pipeline-only paper-faithful overrides (2026-08-10) -----
+# These apply ONLY to the canonical/reference pipeline (prepana02-07),
+# not to the multiverse (mulana01/02/03, src.multiverse_pipeline), which
+# keeps its own dataset-agnostic 3x3x3 grid (highpass_hz/asr_mode/
+# iclabel_rule) identical between stepUpAms and Jacobsen -- see NOTES.md
+# for the rationale (two different reference pipelines, one identical
+# multiverse, is the intentional design).
+#
+#   REFERENCE_HIGHPASS_HZ         -- main analysis high-pass (Jacobsen et
+#                                     al.'s own 0.2 Hz, OFF the multiverse's
+#                                     highpass grid {0.5, 1, 2} -- the
+#                                     reference is not meant to be a grid
+#                                     vertex here, unlike stepUpAms's
+#                                     reference == universe_17).
+#   REFERENCE_ICA_FIT_HIGHPASS_HZ -- separate, more aggressive high-pass
+#                                     (paper's ICA_bandpass_fmin) applied
+#                                     ONLY to the copy of the data ICA is
+#                                     fit on (AutoReject epoching + ICA
+#                                     decomposition); the resulting ICA
+#                                     weights are then applied back to the
+#                                     REFERENCE_HIGHPASS_HZ-filtered data,
+#                                     not to this more-aggressively-
+#                                     filtered copy. Standard practice
+#                                     (slow drift removed for a more
+#                                     stable decomposition; final data
+#                                     keeps the gentler analysis filter).
+#   REFERENCE_WARP_ANCHORS_PCT    -- paper's FIXED warp latencies
+#                                     (gait_event_newLat=[1,18,50,68,100],
+#                                     expressed here as the (A_lto, A_lhs,
+#                                     A_rto) percent-of-cycle anchors
+#                                     warp_cycle_to_grid()/
+#                                     phase_split_indices() already take --
+#                                     see src.ersp.load_reference_anchors).
+#                                     Imposed, not data-derived: used ONLY
+#                                     by the reference pipeline
+#                                     (prepana05/06/07); the Jacobsen
+#                                     multiverse keeps using the computed
+#                                     group-median anchors from
+#                                     group_gait_event_anchors_frozen.json,
+#                                     same as stepUpAms.
+REFERENCE_HIGHPASS_HZ         = 0.2
+REFERENCE_ICA_FIT_HIGHPASS_HZ = 2.0
+REFERENCE_WARP_ANCHORS_PCT    = (18.0, 50.0, 68.0)   # (A_lto, A_lhs, A_rto)
+
+# --- Documented deviations from Jacobsen et al.'s own pipeline ---------
+# The reference pipeline reproduces the paper's preprocessing choices
+# with THREE known deviations (all deliberate project decisions, not
+# oversights -- record for the manuscript):
+#
+#   1. ICA: Extended Infomax (src.config.ICA_METHOD="infomax",
+#      fit_params={"extended": True}), NOT the paper's AMICA. AMICA has
+#      no maintained Python implementation available to this pipeline.
+#   2. Line noise: a 50 Hz notch filter (src.config.LINE_FREQ=50.0),
+#      NOT the paper's Zapline-plus. Zapline-plus is a MATLAB/EEGLAB
+#      plugin with no equivalent wired into this Python pipeline.
+#   3. ASR: standard SD-cutoff burst-correction (asrpy, cutoff=20,
+#      src.config.ASR_CUTOFF/USE_ASR -- Mullen et al. 2015 style), NOT
+#      the paper's channel-rejection-only ASR call (FlatlineCriterion=5,
+#      ChannelCriterion=0.8, LineNoiseCriterion=4, burst correction OFF).
+#      That specific EEGLAB clean_rawdata channel-rejection algorithm has
+#      no Python port in this environment (no MATLAB/EEGLAB available);
+#      rather than hand-approximate it, this was an explicit decision
+#      (2026-08-10) to keep the existing, already-validated ASR=20
+#      burst-correction path unchanged for Jacobsen's reference pipeline.
 
 # --- Annotation names the shared pipeline crops on (see src.pipeline_steps) ---
 # Both reuse the exact names stepUpAms's pipeline_steps/prepana04-07/

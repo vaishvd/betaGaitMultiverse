@@ -48,6 +48,7 @@ def label_and_mark_ica(
     ica: mne.preprocessing.ICA,
     epochs: mne.Epochs,
     rule: str = "balanced",
+    artifact_rule_fn=None,
 ) -> dict:
     """
     Run ICLabel on epochs and mark components for exclusion, return updated ICA.
@@ -62,9 +63,20 @@ def label_and_mark_ica(
     (the other: lowpass_hz) of the reference pipeline failing to reproduce
     a matching multiverse universe's effect size even at matched
     highpass/asr_mode/iclabel_rule settings.
+
+    Parameters
+    ----------
+    artifact_rule_fn : optional callable(probs) -> list[int]. If given,
+        used INSTEAD of select_ics_by_rule(probs, rule) -- e.g.
+        select_ics_jacobsen_paper_rule below, kept deliberately decoupled
+        from this shared rule/multiverse vocabulary. `rule` is used only
+        for the printed label in that case.
     """
     probs, labels = iclabel_probabilities(ica, epochs)
-    exclude_ics = select_ics_by_rule(probs, rule)
+    if artifact_rule_fn is not None:
+        exclude_ics = artifact_rule_fn(probs)
+    else:
+        exclude_ics = select_ics_by_rule(probs, rule)
     brain_ics   = [i for i in range(len(labels)) if i not in exclude_ics]
 
     print(f"\n  ICLabel classification (rule={rule}):")
@@ -142,6 +154,34 @@ def select_ics_by_rule(probs: np.ndarray, rule: str) -> list[int]:
         keep = ~((p_muscle > 0.9) | (p_eye > 0.9))
     else:
         raise ValueError(f"Unknown iclabel_rule: {rule!r}")
+    return [i for i, k in enumerate(keep) if not k]
+
+
+def select_ics_jacobsen_paper_rule(probs: np.ndarray) -> list[int]:
+    """
+    Jacobsen et al.'s own paper-exact ICLabel artifact-rejection rule:
+    exclude a component if P(eye) > 0.9 OR P(muscle) > 0.9.
+
+    Deliberately a standalone function, NOT a branch of
+    select_ics_by_rule() above and NOT wired through iclabel_rule/
+    ICLABEL_RULE -- this is the Jacobsen reference pipeline's own paper-
+    fidelity rule, kept decoupled from the multiverse's shared
+    "conservative"/"balanced"/"liberal" vocabulary (whose "liberal"
+    branch happens to compute the same threshold today, but the two are
+    intentionally not the same code path, so a future change to one
+    rule's meaning can never silently change the other's).
+
+    Parameters
+    ----------
+    probs : ndarray, shape (n_components, 7)
+        From iclabel_probabilities(), columns ordered per ICLABEL_CLASSES.
+
+    Returns
+    -------
+    exclude_ics : list of int
+    """
+    p_muscle, p_eye = probs[:, 1], probs[:, 2]
+    keep = ~((p_muscle > 0.9) | (p_eye > 0.9))
     return [i for i, k in enumerate(keep) if not k]
 
 

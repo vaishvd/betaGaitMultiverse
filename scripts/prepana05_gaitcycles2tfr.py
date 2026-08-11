@@ -42,7 +42,7 @@ from src.resume import stage_already_done
 from src.spatial_filter import linear_roi_weights, apply_linear_roi, plot_weight_topography
 from src.ersp import (
     warp_cycle_to_grid, phase_split_indices, compute_standing_baseline,
-    load_group_anchors,
+    load_reference_anchors,
 )
 
 FREQS    = np.arange(TFR_FMIN, int(PIPELINE_TFR_FMAX) + 1, dtype=float)  # 8-60 Hz, permanent (alpha-beta-gamma)
@@ -85,8 +85,8 @@ ROI_TOPO_DIR  = dirs["roi_topo"]
 # pre-flight task's multiverse cross-check). Anchors are now frozen in
 # group_gait_event_anchors_frozen.json and only ever changed by
 # deliberately running scripts/freeze_gait_anchors.py by hand.
-A_lto, A_lhs, A_rto = load_group_anchors(ERSP_DIR)
-print(f"Group-median gait-event anchors (frozen calibration input):")
+A_lto, A_lhs, A_rto = load_reference_anchors(ERSP_DIR)
+print(f"Reference-pipeline gait-event anchors:")
 print(f"  A_lto = {A_lto:.2f}%   A_lhs = {A_lhs:.2f}%   A_rto = {A_rto:.2f}%")
 
 # Optional: restrict the PER-SUBJECT loop below to a single subject (see

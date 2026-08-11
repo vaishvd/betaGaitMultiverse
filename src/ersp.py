@@ -62,6 +62,45 @@ def load_group_anchors(ersp_dir):
     return anchors["A_lto_pct"], anchors["A_lhs_pct"], anchors["A_rto_pct"]
 
 
+def load_reference_anchors(ersp_dir):
+    """
+    Warp anchors for the REFERENCE pipeline only (prepana05/06/07) --
+    computed group-median (via load_group_anchors above) UNLESS the
+    active dataset defines a fixed override, src.config.
+    REFERENCE_WARP_ANCHORS_PCT (currently: Jacobsen only, paper's fixed
+    warp latencies gait_event_newLat=[1,18,50,68,100] expressed as
+    (A_lto, A_lhs, A_rto)=(18.0, 50.0, 68.0) -- see config_jacobsen.py).
+
+    The multiverse (src.multiverse_pipeline.run_subject_multiverse) calls
+    load_group_anchors() directly, NOT this function, and so is
+    unaffected by this override for either dataset -- its own 27
+    universes keep using computed, data-derived anchors identically for
+    stepUpAms and Jacobsen. This function exists so the Jacobsen
+    reference pipeline's imposed-not-data-derived warp (a deliberate
+    paper-fidelity deviation from the multiverse's methodology) can never
+    leak into the shared frozen-anchors file the multiverse also reads.
+
+    Parameters
+    ----------
+    ersp_dir : Path
+        Dataset ERSP directory, as for load_group_anchors().
+
+    Returns
+    -------
+    (A_lto, A_lhs, A_rto) : tuple of float
+    """
+    from src import config
+    # getattr, not a hard import: only config_jacobsen.py defines this
+    # attribute; config_stepup.py deliberately does not (stepUpAms is
+    # untouched and always falls through to load_group_anchors below).
+    fixed = getattr(config, "REFERENCE_WARP_ANCHORS_PCT", None)
+    if fixed is not None:
+        print(f"  Reference warp anchors: FIXED (paper-imposed, not data-"
+              f"derived) = {fixed}")
+        return tuple(fixed)
+    return load_group_anchors(ersp_dir)
+
+
 def warp_cycle_to_grid(power, lto_idx, lhs_idx, rto_idx, anchors, n_points=TFR_N_POINTS):
     """
     Piecewise-linear (4-segment) time-warp of one cycle's power time
@@ -216,33 +255,6 @@ def compute_standing_baseline(
 
     stack = np.stack(tfr_list)   # (n_kept, n_ch, n_freqs, n_time_cropped)
     return stack.mean(axis=(0, 3))   # (n_ch, n_freqs)
-
-
-def apply_gpm_normalization(ersp):
-    """
-    Gait-phase-mean (GPM) re-normalization of an already baseline-
-    normalized ERSP array: express each (channel, frequency) row's ERSP
-    as dB relative to that row's OWN mean across the whole gait cycle,
-    instead of dB relative to the standing/rest baseline.
-
-        ERSP_gpm(..., t) = ERSP(..., t) - mean_t[ERSP(..., t)]
-
-    Operates on the last axis (the gait-cycle-% axis, e.g. the 101-point
-    grid from warp_cycle_to_grid); works on any leading shape --
-    (n_ch, n_freqs, n_points), (n_freqs, n_points), etc.
-
-    This is a pure post-hoc transform of the standing-baselined ERSP
-    dB array -- it does not touch the underlying TFR power, the
-    standing baseline, or any raw/ICA data. Because it subtracts a
-    per-(channel, frequency) CONSTANT (uniform across t) from every
-    gait-cycle point, it cancels EXACTLY in any linear contrast between
-    two subsets of t -- in particular the double-stance-mean-minus-
-    swing-mean beta contrast used by prepana07/multiverse_pipeline is
-    mathematically invariant to this transform, and the group paired
-    t-test is identical whether GPM or standing normalization is used
-    (see prepana07_betaphase_stats.py's cross-mode verification).
-    """
-    return ersp - ersp.mean(axis=-1, keepdims=True)
 
 
 def beta_roi_scalar(ersp_map, weights, freqs, fmin=BETA_FMIN, fmax=BETA_FMAX):

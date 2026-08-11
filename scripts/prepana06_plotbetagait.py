@@ -11,10 +11,8 @@ and the manuscript Discussion) with event ticks and gait phase bars
 underneath.
 
 Right: three beta-band (13-30 Hz) topographies on a shared colour scale
-with one shared colorbar. Under standing-baseline normalization: whole
-gait cycle, swing only, double-stance only. Under GPM (whole-cycle is
-~zero by construction under GPM, so uninformative): swing only,
-double-stance only, double-stance-minus-swing difference.
+with one shared colorbar: whole gait cycle, swing only, double-stance
+only.
 
 Input
 -----
@@ -25,11 +23,12 @@ d03_clean/      sub-{sub}_desc-icaClean_concat_raw.fif  (for channel info)
 
 Output
 ------
-results/pipeline/<dataset>/plots/
-    <dataset>_betaersp_gait.png              (NORMALIZATION="gpm", primary)
-    <dataset>_betaersp_gait_standingBL.png    (NORMALIZATION="standing")
-Select via the BETAGAIT_NORMALIZATION env var (src.config.NORMALIZATION,
-default "gpm") -- run this script once per mode to get both files.
+results/pipeline/<dataset>/plots/<dataset>_betaersp_gait.png
+Standing-baseline is the only normalization for both datasets
+(2026-08-11 -- GPM removed project-wide; it was exploratory leftover
+from an earlier "compute both to compare" phase, mathematically
+identical to standing for the double-stance-vs-swing contrast, see
+NOTES.md).
 """
 
 import numpy as np
@@ -43,20 +42,15 @@ from pathlib import Path
 
 from src.paths import get_dataset_dirs
 from src.config import (
-    DATASET, SUBJECTS, DIR_PLOTS, PIPELINE_TFR_FMAX, NORMALIZATION, ERSP_CMAP,
+    DATASET, SUBJECTS, DIR_PLOTS, PIPELINE_TFR_FMAX, ERSP_CMAP,
     TFR_FMIN, ROI_CENTER_CH,
 )
 from src.spatial_filter import linear_roi_weights, apply_linear_roi, TOPOMAP_SPHERE
 from src.ersp import (
-    load_group_anchors, phase_split_indices, apply_gpm_normalization,
-    BETA_FMIN, BETA_FMAX,
+    load_reference_anchors, phase_split_indices, BETA_FMIN, BETA_FMAX,
 )
 
-NORM_LABEL = {
-    "gpm":      "GPM: dB relative to mean gait cycle",
-    "standing": "dB relative to standing baseline",
-}[NORMALIZATION]
-OUT_SUFFIX = "" if NORMALIZATION == "gpm" else "_standingBL"
+NORM_LABEL = "dB relative to standing baseline"
 
 FREQS = np.arange(TFR_FMIN, int(PIPELINE_TFR_FMAX) + 1)
 
@@ -70,7 +64,7 @@ PLOTS_DIR     = Path(DIR_PLOTS)
 # used there to warp every cycle onto the common grid). Loaded rather than
 # recomputed here so the plotted event lines always match the anchors the
 # ERSP arrays were actually warped to.
-A_lto, A_lhs, A_rto = load_group_anchors(ERSP_DIR)
+A_lto, A_lhs, A_rto = load_reference_anchors(ERSP_DIR)
 
 # Event-anchored double-stance / swing phase windows on the common 101-point
 # grid -- same anchors and construction as prepana05/multiverse_pipeline
@@ -94,12 +88,6 @@ for subject in SUBJECTS:
         ersp     = np.load(ersp_path)   # (n_ch, n_freqs, 101), standing-baselined
         cycles   = pd.read_csv(cycles_path, sep="\t")
         raw_ref  = mne.io.read_raw_fif(clean_path, preload=False, verbose=False)
-
-        # GPM re-normalization (display-layer only, per subject, before any
-        # ROI/phase reduction below) -- see src.ersp.apply_gpm_normalization.
-        # A no-op when NORMALIZATION=="standing".
-        if NORMALIZATION == "gpm":
-            ersp = apply_gpm_normalization(ersp)
 
         # Load or compute linear ROI weights
         weights_path = ERSP_DIR / f"sub-{subject}_roi_weights.npy"
@@ -165,7 +153,7 @@ print(f"  Group ERSP range: {ersp_group.min():.2f} / {ersp_group.max():.2f} dB")
 print(f"  Group events: LTO={mean_lto_group:.1f}%  "
       f"LHS={mean_lhs_group:.1f}%  RTO={mean_rto_group:.1f}%")
 
-out_path = PLOTS_DIR / f"{DATASET}_betaersp_gait{OUT_SUFFIX}.png"
+out_path = PLOTS_DIR / f"{DATASET}_betaersp_gait.png"
 
 fig = plt.figure(figsize=(18, 13))
 gs_outer = gridspec.GridSpec(1, 2, width_ratios=[2.6, 1.0], wspace=0.3, figure=fig)
@@ -212,13 +200,13 @@ print(f"\n  Alignment check -- event anchors: LTO={mean_lto_group:.2f}%  "
 print(f"  Heatmap x-extent: uncorrected=[0, 100] (max column-vs-anchor "
       f"offset +-{_uncorrected_max_offset:.4f}%) -> corrected="
       f"[{-dx_gait/2:.4f}, {100 + dx_gait/2:.4f}] (offset now 0.0000% at every column)")
-# Symmetric color limit, computed PER DATASET AND PER NORMALIZATION MODE
-# from this run's own data (99th percentile of |value|) -- NOT a single
-# global constant shared across datasets/modes. Jacobsen-under-GPM's real
-# range (~+-0.8 dB) is roughly 4x smaller than stepUpAms's (~+-3 dB); a
-# shared fixed limit tuned for one made the other render nearly blank.
+# Symmetric color limit, computed PER DATASET from this run's own data
+# (99th percentile of |value|) -- NOT a single global constant shared
+# across datasets. Jacobsen's real range (~+-0.8 dB) is roughly 4x
+# smaller than stepUpAms's (~+-3 dB); a shared fixed limit tuned for one
+# made the other render nearly blank.
 heatmap_vlim = float(np.percentile(np.abs(ersp_group), 99))
-print(f"  Heatmap color limit ({DATASET}, {NORMALIZATION}): "
+print(f"  Heatmap color limit ({DATASET}): "
       f"99th pct |value| = +-{heatmap_vlim:.3f} dB")
 
 im = ax_heat.imshow(
@@ -309,37 +297,20 @@ ax_phases.tick_params(axis="x", labelsize=11)
 for spine in ax_phases.spines.values():
     spine.set_visible(False)
 
-# Three beta-band topographies, shared colour scale + one shared colorbar.
-#
-# Under GPM, "whole gait cycle" is ~zero everywhere by construction (GPM
-# forces each channel's own full-cycle mean to zero, and "whole gait
-# cycle" IS that mean) -- uninformative, so in the GPM figure ONLY it's
-# replaced with the double-stance-minus-swing difference topo: the
-# spatial map of the actual effect, and normalization-invariant (the
-# GPM/standing term cancels in the difference, same proof as the ROI-
-# reduced scalar contrast -- verified below). The standingBL figure keeps
-# the original whole/swing/double-stance layout unchanged.
-if NORMALIZATION == "gpm":
-    group_beta_diff = group_beta_ds - group_beta_swing
-    topo_arrays_shown = [group_beta_swing, group_beta_ds, group_beta_diff]
-    topo_specs = [
-        (ax_topo_w,  group_beta_swing, "Beta (13-30 Hz)\nswing only"),
-        (ax_topo_sw, group_beta_ds,    "Beta (13-30 Hz)\ndouble-stance only"),
-        (ax_topo_ds, group_beta_diff,  "Beta (13-30 Hz)\ndouble-stance - swing"),
-    ]
-else:
-    topo_arrays_shown = [group_beta_whole, group_beta_swing, group_beta_ds]
-    topo_specs = [
-        (ax_topo_w,  group_beta_whole, "Beta (13-30 Hz)\nwhole gait cycle"),
-        (ax_topo_sw, group_beta_swing, "Beta (13-30 Hz)\nswing only"),
-        (ax_topo_ds, group_beta_ds,    "Beta (13-30 Hz)\ndouble-stance only"),
-    ]
+# Three beta-band topographies, shared colour scale + one shared colorbar:
+# whole gait cycle, swing only, double-stance only.
+topo_arrays_shown = [group_beta_whole, group_beta_swing, group_beta_ds]
+topo_specs = [
+    (ax_topo_w,  group_beta_whole, "Beta (13-30 Hz)\nwhole gait cycle"),
+    (ax_topo_sw, group_beta_swing, "Beta (13-30 Hz)\nswing only"),
+    (ax_topo_ds, group_beta_ds,    "Beta (13-30 Hz)\ndouble-stance only"),
+]
 
-# Symmetric color limit, computed PER DATASET AND PER NORMALIZATION MODE
-# from the 99th percentile of |value| across exactly the arrays actually
-# shown in this figure (not a global constant -- see heatmap_vlim above).
+# Symmetric color limit, computed PER DATASET from the 99th percentile of
+# |value| across exactly the arrays actually shown in this figure (not a
+# global constant -- see heatmap_vlim above).
 vlim_beta = float(np.percentile(np.abs(np.concatenate(topo_arrays_shown)), 99))
-print(f"  Beta topo color limit ({DATASET}, {NORMALIZATION}): "
+print(f"  Beta topo color limit ({DATASET}): "
       f"99th pct |value| = +-{vlim_beta:.3f} dB")
 
 im_topo = None

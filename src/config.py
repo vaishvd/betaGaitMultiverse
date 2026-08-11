@@ -29,31 +29,20 @@ if ACTIVE_DATASET not in _PER_DATASET:
         f"expected one of {sorted(_PER_DATASET)}"
     )
 
-# --- ERSP normalization mode -- shared, dataset-agnostic, selectable via
-# env var exactly like ACTIVE_DATASET above.
-#   "gpm"      -- PRIMARY. dB relative to each subject's own mean ERSP
-#                 across the whole gait cycle (src.ersp.
-#                 apply_gpm_normalization), applied on top of the
-#                 existing standing-baselined ERSP arrays. Removes the
-#                 global standing-vs-walking offset (e.g. Jacobsen's
-#                 all-negative ERSP, a baseline-choice artifact: standing
-#                 beta > walking beta) and shows phase modulation
-#                 directly. Mathematically invariant for the double-
-#                 stance-vs-swing contrast (a per-subject, per-frequency
-#                 CONSTANT subtracted uniformly across the gait cycle
-#                 cancels exactly in any linear contrast between two
-#                 subsets of it) -- verified in
-#                 prepana07_betaphase_stats.py.
-#   "standing" -- previous/default behaviour: dB relative to the
-#                 standing/rest baseline (stepUpAms STAND; Jacobsen
-#                 restEEG+120s). Still fully runnable for comparison.
-# Does not affect preprocessing, ICA, or the multiverse (which is
-# untouched by this switch and always uses the standing baseline).
-NORMALIZATION = os.environ.get("BETAGAIT_NORMALIZATION", "gpm")
-if NORMALIZATION not in ("gpm", "standing"):
-    raise ValueError(
-        f"Unknown NORMALIZATION {NORMALIZATION!r} -- expected 'gpm' or 'standing'"
-    )
+# --- ERSP normalization: standing-baseline only (2026-08-11) ----------
+# Previously selectable via BETAGAIT_NORMALIZATION between "gpm" (dB
+# relative to each subject's own whole-gait-cycle mean,
+# src.ersp.apply_gpm_normalization) and "standing" (dB relative to the
+# standing/rest baseline). GPM was exploratory leftover from an earlier
+# "compute both to compare" phase -- stepUpAms was always meant to be
+# standing-baseline only, and GPM/standing are mathematically identical
+# for the double-stance-vs-swing contrast (a per-subject, per-frequency
+# CONSTANT subtracted uniformly across the gait cycle cancels exactly in
+# any linear contrast between two subsets of it -- confirmed identical
+# t-statistics both times this was checked). Removed entirely; standing-
+# baseline is now the only normalization for both datasets. Never
+# affected preprocessing, ICA, or the multiverse (multiverse_pipeline.py
+# and mulana0*.py never referenced GPM/NORMALIZATION at all).
 
 # --- Permanent band split (was formerly an ACTIVE_VARIANT/BETAGAIT_VARIANT
 # toggle between "ref40"/"ref60" -- retired; see git history if that
@@ -107,10 +96,9 @@ MULTIVERSE_LOWPASS_HZ = 60.0
 #                        rather than a per-run data-driven max). NOT used
 #                        by prepana06_plotbetagait.py any more -- that
 #                        script now computes its own heatmap/topo limits
-#                        per dataset and per NORMALIZATION mode (99th
-#                        percentile of |value| for that specific run),
-#                        since one global constant made Jacobsen-under-
-#                        GPM (real range ~+-0.8 dB) render nearly blank
+#                        per dataset (99th percentile of |value| for that
+#                        specific run), since one global constant made
+#                        Jacobsen's real range (~+-0.8 dB) render nearly blank
 #                        against a limit tuned for stepUpAms (~+-3 dB).
 #   BETA_TOPO_VLIM    -- retained for reference/history only; no longer
 #                        imported anywhere (prepana06 now computes its
@@ -234,8 +222,9 @@ del _name
 # untouched by this constant.
 # See: Mullen et al. 2015 IEEE TBME; Gorjan et al. 2022 J Neural Eng
 #
-# BETAGAIT_USE_ASR env var override (2026-08-09) -- same pattern as
-# NORMALIZATION above: lets one dataset's reference re-run flip ASR off
+# BETAGAIT_USE_ASR env var override (2026-08-09) -- same env-var-switch
+# pattern the old BETAGAIT_NORMALIZATION used before GPM was removed
+# (2026-08-11): lets one dataset's reference re-run flip ASR off
 # per-invocation (e.g. for stepUpAms's ASR-off/standing-baseline
 # reference variant) without changing the shared default, so Jacobsen
 # (or any run without the env var set) is completely unaffected.

@@ -183,9 +183,9 @@ def _load_and_annotate_eeglab(
     multiverse_pipeline.py need no dataset-specific branching beyond
     this loader.
 
-    "STAND" <- a fixed config.BASELINE_DURATION_S window starting at
-    the config.BASELINE_START_VALUE event (the dataset's own restEEG
-    end marker fires too early to trust -- see config_jacobsen.py).
+    "STAND" <- the config.BASELINE_START_VALUE .. BASELINE_END_VALUE
+    event window (the dataset's own start_standing/end_standing quiet-
+    standing block -- see config_jacobsen.py).
     "CS"    <- the config.SEGMENT_START_VALUE .. SEGMENT_END_VALUE
     event window (the non-button "easy" outdoor walking bout).
 
@@ -205,7 +205,7 @@ def _load_and_annotate_eeglab(
     """
     from src.config import (
         TASK_NAME, SEGMENT_START_VALUE, SEGMENT_END_VALUE,
-        BASELINE_START_VALUE, BASELINE_DURATION_S,
+        BASELINE_START_VALUE, BASELINE_END_VALUE,
     )
 
     eeg_dir  = raw_dir / f"sub-{subject}" / "eeg"
@@ -260,28 +260,31 @@ def _load_and_annotate_eeglab(
     walk_start = _onset(SEGMENT_START_VALUE)
     walk_end   = _onset(SEGMENT_END_VALUE)
 
-    # Validated per-subject for all 18 analysis subjects (see
-    # scripts/diag_jacobsen_baseline_check.py and
-    # results/pipeline/jacobsen/qc/baseline_120s_check.txt): a full 120 s
-    # of continuous recording exists after start_restEEG onset, and that
-    # window does not run into the walking task. This raises rather than
-    # silently truncating -- if it ever fires for a subject not covered
-    # by that validation, that's a real data problem requiring a
-    # decision, not something to paper over with a shortened window.
+    # Validated per-subject for all 18 analysis subjects (2026-08-10):
+    # both BASELINE_START_VALUE ("start_standing") and BASELINE_END_VALUE
+    # ("end_standing") are present exactly once, the resulting window is
+    # exactly 240.0s for every subject, and it always falls strictly
+    # before SEGMENT_START_VALUE (never overruns into the walking task).
+    # This raises rather than silently coping -- if it ever fires for a
+    # subject not covered by that validation, that's a real data problem
+    # requiring a decision, not something to paper over.
     baseline_start = _onset(BASELINE_START_VALUE)
-    baseline_end   = baseline_start + BASELINE_DURATION_S
+    baseline_end   = _onset(BASELINE_END_VALUE)
+    if baseline_end <= baseline_start:
+        raise RuntimeError(
+            f"sub-{subject}: {BASELINE_END_VALUE} onset ({baseline_end:.1f}s) "
+            f"is not after {BASELINE_START_VALUE} onset ({baseline_start:.1f}s)."
+        )
     if baseline_end > raw.times[-1]:
         raise RuntimeError(
-            f"sub-{subject}: only {raw.times[-1] - baseline_start:.1f}s of "
-            f"recording after {BASELINE_START_VALUE} onset -- "
-            f"{BASELINE_DURATION_S:.0f}s baseline window would be truncated. "
-            "Not silently shortening -- this subject needs an explicit decision."
+            f"sub-{subject}: {BASELINE_END_VALUE} onset ({baseline_end:.1f}s) "
+            f"exceeds recording length ({raw.times[-1]:.1f}s)."
         )
     if baseline_end > walk_start:
         raise RuntimeError(
-            f"sub-{subject}: {BASELINE_DURATION_S:.0f}s baseline window "
-            f"[{baseline_start:.1f}, {baseline_end:.1f}]s overruns "
-            f"{SEGMENT_START_VALUE} at {walk_start:.1f}s -- needs an explicit decision."
+            f"sub-{subject}: baseline window [{baseline_start:.1f}, "
+            f"{baseline_end:.1f}]s overruns {SEGMENT_START_VALUE} at "
+            f"{walk_start:.1f}s -- needs an explicit decision."
         )
 
     raw.annotations.append(baseline_start, baseline_end - baseline_start, "STAND")
@@ -400,6 +403,8 @@ def fit_ica(
     ica_path: Path | None = None,
     iclean_path: Path | None = None,
     epo_path: Path | None = None,
+    ica_fit_highpass_hz: float | None = None,
+    artifact_rule_fn=None,
 ) -> tuple[mne.io.BaseRaw, mne.preprocessing.ICA, int]:
     """
     Fit Extended Infomax ICA on fixed-length epochs, run ICLabel,
@@ -414,9 +419,25 @@ def fit_ica(
     subject      : subject id for logging
     iclabel_rule : {"conservative", "balanced", "liberal"} -- passed to
                    src.ica_utils.select_ics_by_rule via label_and_mark_ica,
-                   the same rule the multiverse pipeline uses
+                   the same rule the multiverse pipeline uses. Ignored if
+                   artifact_rule_fn is given.
     ica_path     : optional path to save/load ICA object (.fif)
     iclean_path  : optional path to save/load cleaned raw (.fif)
+    ica_fit_highpass_hz : optional float. If given, AutoReject epoching
+                   and the ICA fit itself run on a COPY of `raw`
+                   additionally high-passed at this cutoff (e.g.
+                   Jacobsen's paper-faithful ICA_bandpass_fmin=2.0Hz,
+                   src.config_jacobsen.REFERENCE_ICA_FIT_HIGHPASS_HZ) --
+                   the resulting ICA weights are then applied to the
+                   ORIGINAL `raw` (at its own, gentler analysis
+                   highpass), not to this copy. None (default) fits
+                   directly on `raw`, unchanged behaviour.
+    artifact_rule_fn : optional callable(probs) -> list[int]. If given,
+                   used instead of src.ica_utils.select_ics_by_rule for
+                   component exclusion (see label_and_mark_ica) -- e.g.
+                   Jacobsen's paper-exact P(eye)>0.9 OR P(muscle)>0.9
+                   artifact rule, kept deliberately decoupled from the
+                   multiverse's shared iclabel_rule vocabulary.
 
     Returns
     -------
@@ -434,8 +455,19 @@ def fit_ica(
         n_brain = ica.n_components_ - len(ica.exclude)
         return raw_clean, ica, n_brain
 
+    if ica_fit_highpass_hz is not None:
+        raw_for_ica = raw.copy().filter(
+            l_freq=float(ica_fit_highpass_hz), h_freq=None,
+            fir_design="firwin", verbose=False,
+        )
+        print(f"  sub-{subject}: ICA fit on {ica_fit_highpass_hz:.1f}Hz-"
+              f"highpassed copy (ICA_bandpass_fmin); weights applied "
+              f"back to the analysis-highpass raw")
+    else:
+        raw_for_ica = raw
+
     epochs_raw = mne.make_fixed_length_epochs(
-        raw, duration=EPOCH_DUR, preload=True, verbose=False
+        raw_for_ica, duration=EPOCH_DUR, preload=True, verbose=False
     )
     epochs_raw.pick("eeg")
     drop_invalid_eeg_channels(epochs_raw)
@@ -466,7 +498,7 @@ def fit_ica(
     )
 
     result = label_and_mark_ica(
-        ica, epochs_clean, rule=iclabel_rule
+        ica, epochs_clean, rule=iclabel_rule, artifact_rule_fn=artifact_rule_fn,
     )
     n_brain = len(result["brain_ics"])
     if n_brain == 0:
