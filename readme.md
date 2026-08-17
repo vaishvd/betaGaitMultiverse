@@ -68,8 +68,7 @@ betaGaitMultiverse/
 │   ├── mulana03_visualize_multiverse.py # Multiverse: specification curve + plots
 │   ├── mulana04_zoom_universes.py       # Multiverse: lowest/median/highest universe comparison
 │   ├── freeze_gait_anchors.py           # Compute + freeze group-median gait-event anchors
-│   └── setup/
-│       └── 00_download_openneuro_dataset.py  # Download raw data (openneuro-py; Jacobsen-specific)
+│   └── 00_download_openneuro_dataset.py  # Download raw data (openneuro-py; Jacobsen-specific)
 │
 ├── src/
 │   ├── config.py                        # Centralised parameters + ACTIVE_DATASET selector
